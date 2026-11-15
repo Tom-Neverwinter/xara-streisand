@@ -273,10 +273,15 @@ fn read_commands(mut s: TcpStream, tx: &SyncSender<Input>) {
     let mut buf = [0u8; 4096];
     let mut line = Vec::new();
     let mut long = false;
+    let mut first = true;
     while let Ok(n @ 1..) = s.read(&mut buf) {
         for &b in &buf[..n] {
             match b {
                 b'\r' => {
+                    if std::mem::take(&mut first) && crate::http_request_line(&line) {
+                        crate::refuse_http("command");
+                        return;
+                    }
                     let l = String::from_utf8_lossy(&line).into_owned();
                     line.clear();
                     if std::mem::take(&mut long) {
@@ -301,9 +306,14 @@ fn read_commands(mut s: TcpStream, tx: &SyncSender<Input>) {
 
 fn read_data(mut s: TcpStream, tx: &SyncSender<Input>, hold: &Hold) {
     let mut buf = vec![0; DATA_CHUNK];
+    let mut first = true;
     loop {
         hold.wait();
         let Ok(n @ 1..) = s.read(&mut buf) else { return };
+        if std::mem::take(&mut first) && crate::http_request_line(&buf[..n]) {
+            crate::refuse_http("data");
+            return;
+        }
         if tx.send(Input::Data(buf[..n].to_vec())).is_err() {
             return;
         }
