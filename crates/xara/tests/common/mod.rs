@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+// Off Unix the TCP lab helpers below are not built; their imports go unused.
+#![cfg_attr(not(unix), allow(unused_imports))]
 
 pub mod air;
 
@@ -11,8 +13,10 @@ use std::time::{Duration, Instant};
 use xara::monitor::record::{Body, Record};
 use xara::station::hf::Station;
 use xara::station::{Modem, Options};
+#[cfg(unix)]
 use xara::tnc::Tnc;
 use xara_arq::hf::session::Config;
+#[cfg(unix)]
 use xara_host::server::Host;
 use xara_phy::hf::ctrl::Role;
 use xara_phy::hf::level::Bandwidth;
@@ -55,6 +59,7 @@ impl Probe {
     }
 }
 
+#[cfg(unix)]
 pub struct Client {
     pub cmd: TcpStream,
     pub data: TcpStream,
@@ -63,6 +68,7 @@ pub struct Client {
     probe: Probe,
 }
 
+#[cfg(unix)]
 impl Client {
     fn attach(h: &Host) -> Self {
         let cmd = TcpStream::connect(h.cmd_addr).unwrap();
@@ -134,6 +140,7 @@ impl Client {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Client {
     fn drop(&mut self) {
         self.close();
@@ -148,10 +155,12 @@ pub fn options() -> Options {
     Options { drive_db: -5.0, ..Options::default() }
 }
 
+#[cfg(unix)]
 pub fn tnc(bw: Bandwidth, call: &str) -> Tnc<Station> {
     Tnc::new(Station::new(Config::new(bw, call), options()), Host::bind("127.0.0.1", 0).unwrap())
 }
 
+#[cfg(unix)]
 pub struct Lab<M: Modem = Station> {
     pub tnc: Vec<Tnc<M>>,
     wire: Vec<Vec<f64>>,
@@ -159,6 +168,7 @@ pub struct Lab<M: Modem = Station> {
     probes: Vec<(usize, Probe, usize)>,
 }
 
+#[cfg(unix)]
 impl Lab {
     pub fn new(n: usize) -> Self {
         let calls = ["XX0A", "XX0B"];
@@ -166,6 +176,7 @@ impl Lab {
     }
 }
 
+#[cfg(unix)]
 impl<M: Modem> Lab<M> {
     pub fn with(tnc: Vec<Tnc<M>>) -> Self {
         let n = tnc.len();
@@ -264,6 +275,7 @@ fn wait(done: impl Fn() -> bool) -> bool {
     true
 }
 
+#[cfg(unix)]
 pub fn ask<M: Modem>(lab: &mut Lab<M>, c: &mut Client, raw: &[u8], n: usize) -> Vec<String> {
     let start = c.len();
     c.raw(raw);

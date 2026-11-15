@@ -13,7 +13,7 @@ use std::time::Duration;
 pub const MAX_LINE: usize = 1024;
 pub const DATA_CHUNK: usize = 65536;
 pub const INPUT_QUEUE: usize = 64;
-pub(crate) const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+pub(crate) use crate::ACCEPT_BACKOFF;
 const WAKE_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]

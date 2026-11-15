@@ -12,12 +12,17 @@ use xara::monitor::ui::{Heard, Shared};
 use xara::monitor::{Monitor, MonitorOpts};
 use xara::resample::{Resampler, check_rate};
 use xara::say;
+#[cfg(unix)]
 use xara::signals;
 use xara_phy::hf::level::Bandwidth;
 use xara_phy::hf::rx::FS;
+#[cfg(unix)]
 use xara_ui::bus;
+#[cfg(unix)]
 use xara_ui::messages::Info;
+#[cfg(unix)]
 use xara_ui::server::{MONITOR, TICK, UiServer};
+#[cfg(unix)]
 use xara_ui::telemetry::EVENT_QUEUE;
 
 const QUEUE: usize = 1200;
@@ -185,11 +190,22 @@ fn decode(mut m: Monitor, rx: Receiver<Vec<f64>>, out: Out, ui: Option<Arc<Share
     drain(&mut m, out, &mut ui)
 }
 
+// Off Unix there is no web UI (see xara-ui), so a Ui is never made there.
+#[cfg_attr(not(unix), allow(dead_code))]
 struct Ui {
     shared: Arc<Shared>,
     status: JoinHandle<()>,
 }
 
+#[cfg(not(unix))]
+fn serve(a: &Args, _: &str, _: Option<f64>, _: &Arc<AtomicBool>) -> io::Result<Option<Ui>> {
+    match a.ui.port {
+        None => Ok(None),
+        Some(_) => Err(io::Error::new(io::ErrorKind::Unsupported, "--ui-port: the web UI is Unix-only for now")),
+    }
+}
+
+#[cfg(unix)]
 fn serve(a: &Args, source: &str, epoch: Option<f64>, stop: &Arc<AtomicBool>) -> io::Result<Option<Ui>> {
     let Some(port) = a.ui.port else { return Ok(None) };
     let (publisher, sub) = bus::channel(EVENT_QUEUE);
@@ -347,6 +363,9 @@ fn main() -> ExitCode {
         }
     }
     let stop = Arc::new(AtomicBool::new(false));
+    // Off Unix, Ctrl-C ends the process at once: fine for a monitor, which
+    // never keys a radio and has nothing to release.
+    #[cfg(unix)]
     let _ = signals::trap(&[libc::SIGINT, libc::SIGTERM], stop.clone(), || {});
     match run(a, &stop) {
         Ok(()) => ExitCode::SUCCESS,

@@ -15,7 +15,9 @@ pub mod ratematch;
 pub mod trusdx;
 pub mod txpath;
 
-#[cfg(not(any(pulse, alsa, coreaudio, feature = "trusdx")))]
+// Off Unix (Windows) there is no audio backend yet: the build is for
+// xara-monitor reading WAV files or stdin, and open_capture() says so.
+#[cfg(all(unix, not(any(pulse, alsa, coreaudio, feature = "trusdx"))))]
 compile_error!("xara needs an audio backend: enable the pulse or alsa feature, or build on macOS for CoreAudio");
 
 use std::collections::VecDeque;
@@ -77,6 +79,7 @@ pub trait Audio {
     fn queued(&mut self) -> io::Result<Option<Queue>>;
     fn backlog(&mut self) -> io::Result<Option<usize>>;
     fn path(&mut self) -> io::Result<Path>;
+    #[cfg(unix)]
     fn ptt(&self) -> Option<Box<dyn crate::ptt::Ptt>> {
         None
     }
@@ -226,7 +229,9 @@ impl Backend {
 }
 
 fn unbuilt_why(b: Backend) -> String {
-    if b == Backend::CoreAudio {
+    if cfg!(not(unix)) {
+        "live audio is not supported on this platform yet; record a WAV and use --wav".into()
+    } else if b == Backend::CoreAudio {
         "coreaudio is only available on macOS".into()
     } else if cfg!(target_os = "macos") && b != Backend::Trusdx {
         format!("{} is not available on macOS", b.name())
@@ -290,6 +295,8 @@ pub fn list(b: Backend) -> io::Result<(DeviceList, DeviceList)> {
     }
 }
 
+// Never true on Unix (the compile_error above), so this only affects Windows.
+#[cfg_attr(not(any(pulse, alsa, coreaudio, feature = "trusdx")), expect(unused_variables))]
 pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
     match b {
         #[cfg(pulse)]

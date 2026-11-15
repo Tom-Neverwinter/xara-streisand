@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -165,7 +165,14 @@ pub fn load(dir: &Path) -> Result<Pairs, String> {
     }
 }
 
+#[cfg(not(unix))]
+pub fn store(_dir: &Path, _kv: &Pairs) -> io::Result<()> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "saving settings is Unix-only for now (file modes)"))
+}
+
+#[cfg(unix)]
 pub fn store(dir: &Path, kv: &Pairs) -> io::Result<()> {
+    use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = dir.join(format!(".{FILE}.tmp"));
     match std::fs::remove_file(&tmp) {
@@ -241,6 +248,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // store() is Unix-only, and this checks its symlink handling
     fn store_load_save_reset() {
         let dir = std::env::temp_dir().join(format!("xara-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

@@ -1,3 +1,6 @@
+// Exercises the TNC, PTT or web UI, which are Unix-only (see the crate root).
+#![cfg(unix)]
+
 use std::net::TcpStream;
 use std::thread;
 use std::time::{Duration, Instant};

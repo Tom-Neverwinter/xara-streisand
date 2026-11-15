@@ -96,7 +96,7 @@ impl KissServer {
                 let s = match l.accept() {
                     Ok((s, _)) => s,
                     Err(_) => {
-                        thread::sleep(crate::server::ACCEPT_BACKOFF);
+                        thread::sleep(crate::ACCEPT_BACKOFF);
                         continue;
                     }
                 };

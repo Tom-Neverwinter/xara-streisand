@@ -1,3 +1,6 @@
+// Exercises the TNC, PTT or web UI, which are Unix-only (see the crate root).
+#![cfg(unix)]
+
 mod common;
 use common::Lab;
 use xara::station::{Modem, Options};
