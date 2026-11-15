@@ -624,7 +624,7 @@ fn parsed(src: &str) -> Vec<String> {
 fn help_lists_exactly_the_parsed_options() {
     let ui = parsed(include_str!("../src/cli.rs"));
     for (bin, src) in [
-        (env!("CARGO_BIN_EXE_xara"), include_str!("../src/main.rs")),
+        (env!("CARGO_BIN_EXE_xara"), include_str!("../src/tnc_main.rs")),
         (env!("CARGO_BIN_EXE_xara-monitor"), include_str!("../src/bin/xara-monitor.rs")),
     ] {
         let (_, help, _) = run(bin, &["--help"]);

@@ -19,6 +19,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpulse-dev libasound2-dev
       - run: rustup toolchain install "$RUST" --profile minimal --component rustfmt,clippy
       - run: cargo +"$RUST" fmt --all --check
+      # main.rs include!s tnc_main.rs, and cargo fmt only follows `mod`.
+      - run: rustfmt +"$RUST" --edition 2024 --check crates/xara/src/tnc_main.rs
       - run: cargo +"$RUST" clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo +"$RUST" clippy --locked -p xara --all-targets --features registered -- -D warnings
       - run: cargo +"$RUST" clippy --locked -p xara --all-targets --no-default-features --features pulse -- -D warnings
