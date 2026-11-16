@@ -55,6 +55,7 @@ fn parse() -> Result<Option<Args>, String> {
     let (mut input, mut bw, mut calls, mut names) = (None, Bandwidth::Hz2300, Vec::new(), Vec::new());
     let mut audio = None;
     let (mut blind, mut dump, mut verbose, mut key_idle) = (true, false, false, xara::monitor::KEY_IDLE_S);
+    let mut diag = false;
     let (mut json, mut log) = (false, None);
     let mut ui = UiArgs::default();
     let mut it = std::env::args().skip(1);
@@ -96,6 +97,7 @@ fn parse() -> Result<Option<Args>, String> {
             }
             "--dump" => dump = true,
             "--verbose" => verbose = true,
+            "--diag" => diag = true,
             "--json" => json = true,
             "--log" => log = Some(PathBuf::from(v()?)),
             _ => return Err(format!("unknown option {k}")),
@@ -108,7 +110,7 @@ fn parse() -> Result<Option<Args>, String> {
     if ui.port.is_none() && (ui.addr.is_some() || !ui.hosts.is_empty()) {
         return Err("--ui-addr and --ui-host need --ui-port".into());
     }
-    let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose };
+    let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose, diag };
     Ok(Some(Args { input, audio, bw, mon, json, ui, log }))
 }
 

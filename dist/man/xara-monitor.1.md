@@ -69,6 +69,13 @@ timestamped details about the observed packets.
 
 :   Report unconfirmed blind detections
 
+**--diag**
+
+:   After each DATA line, print one frame line per received frame, decoded
+    or not: the receiver's SN estimate, raw SN, AFC residual and decoder
+    iterations. Shows whether a failed frame was weak or arrived strong
+    and still failed to decode.
+
 **--json**
 
 :   Print newline-delimited JSON records.

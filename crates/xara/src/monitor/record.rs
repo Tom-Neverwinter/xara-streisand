@@ -84,6 +84,14 @@ pub enum Record {
         afc: f64,
         sender: Option<Role>,
     },
+    FrameDiag {
+        index: usize,
+        ok: bool,
+        snr: f64,
+        raw_snr: f64,
+        afc_res: f64,
+        iterations: usize,
+    },
     Header {
         call: String,
         answerer: String,
@@ -189,6 +197,7 @@ impl Record {
         match self {
             Record::Ctrl { .. } => "ctrl",
             Record::Data { .. } => "data",
+            Record::FrameDiag { .. } => "frame",
             Record::Header { .. } => "header",
             Record::Payload { .. } => "payload",
             Record::LinkEnd { .. } => "link_end",
@@ -235,6 +244,10 @@ impl Record {
                     Some(Role::Answerer) => "answerer → caller",
                     None => "sender unknown",
                 }
+            ),
+            Record::FrameDiag { index, ok, snr, raw_snr, afc_res, iterations } => format!(
+                "  frame {index} [{}] est SN {snr:+.1} raw {raw_snr:+.1} afc res {afc_res:+.2} it {iterations}",
+                if *ok { '+' } else { '-' }
             ),
             Record::Header { call, answerer, flags, start, marker_ok } => format!(
                 "  HEADER {call} → {answerer}: flags {flags:02x} ({}, compression {}, encryption {}), start level {start}{}",
@@ -327,6 +340,14 @@ impl Record {
                 *sender,
             )
             .end(),
+            Record::FrameDiag { index, ok, snr, raw_snr, afc_res, iterations } => o
+                .int("index", *index as u64)
+                .bool("ok", *ok)
+                .num2("snr", *snr)
+                .num2("raw_snr", *raw_snr)
+                .num2("afc_res", *afc_res)
+                .int("iterations", *iterations as u64)
+                .end(),
             Record::Header { call, answerer, flags, start, marker_ok } => o
                 .str("call", call)
                 .str("answerer", answerer)
@@ -433,6 +454,16 @@ mod tests {
         assert_eq!(
             line(&r, None),
             r#"{"t":"payload","ts":12.5,"text":"  ctl 99 r2 h6 last n3 full: 4 B \"a\\r\\xff\\\"\"","sender":null,"ctl":153,"reply":2,"hint":6,"compressed":false,"last":3,"full":true,"status":"data","len":4,"data":"a\rÿ\""}"#
+        );
+    }
+
+    #[test]
+    fn frame_diag_record() {
+        let r = Record::FrameDiag { index: 1, ok: false, snr: -6.04, raw_snr: -7.5, afc_res: 0.123, iterations: 8 };
+        assert_eq!(r.text(), "  frame 1 [-] est SN -6.0 raw -7.5 afc res +0.12 it 8");
+        assert_eq!(
+            line(&r, None),
+            r#"{"t":"frame","ts":12.5,"text":"  frame 1 [-] est SN -6.0 raw -7.5 afc res +0.12 it 8","index":1,"ok":false,"snr":-6.04,"raw_snr":-7.5,"afc_res":0.12,"iterations":8}"#
         );
     }
 

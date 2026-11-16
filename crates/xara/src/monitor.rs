@@ -136,11 +136,20 @@ pub struct MonitorOpts {
     pub key_idle: f64,
     pub dump: bool,
     pub verbose: bool,
+    pub diag: bool,
 }
 
 impl Default for MonitorOpts {
     fn default() -> Self {
-        Self { calls: Vec::new(), names: Vec::new(), blind: true, key_idle: KEY_IDLE_S, dump: false, verbose: false }
+        Self {
+            calls: Vec::new(),
+            names: Vec::new(),
+            blind: true,
+            key_idle: KEY_IDLE_S,
+            dump: false,
+            verbose: false,
+            diag: false,
+        }
     }
 }
 
@@ -160,6 +169,7 @@ pub struct Monitor {
     pub bw: Bandwidth,
     dump: bool,
     verbose: bool,
+    diag: bool,
     key_idle: f64,
     pub stats: Stats,
     rx: Receiver,
@@ -292,6 +302,7 @@ impl Monitor {
             bw,
             dump: o.dump,
             verbose: o.verbose,
+            diag: o.diag,
             key_idle: o.key_idle,
             stats: Stats::default(),
             rx: Receiver::new(bw, &levels, 1, None),
@@ -808,6 +819,20 @@ impl Monitor {
         let sender = if is_header { Some(Role::Caller) } else { self.last_sender.map(other) };
         let afc = t.frames.first().map_or(0.0, |f| f.afc_hz);
         self.emit(t.t_end, Record::Data { level: t.record.get(), frames: ok, sn, afc, sender });
+        if self.diag {
+            for (index, f) in t.frames.iter().enumerate().filter(|(_, f)| !f.missing) {
+                let d = &f.frame;
+                let rec = Record::FrameDiag {
+                    index,
+                    ok: d.ok,
+                    snr: d.snr_db,
+                    raw_snr: d.raw_snr_db,
+                    afc_res: d.afc_res,
+                    iterations: d.iterations,
+                };
+                self.emit(t.t_end, rec);
+            }
+        }
         for f in t.frames.iter().filter(|f| f.frame.ok) {
             self.show_frame(t.t_end, f, sender);
         }
