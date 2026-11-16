@@ -10,7 +10,9 @@ use xara_arq::hf::session::Config;
 use xara_arq::host::HostEvent;
 use xara_phy::call::call_hash;
 use xara_phy::hf::ctrl::Role;
-use xara_phy::hf::level::Bandwidth;
+use xara_phy::hf::frame::{Control, build_frame, header_payload, term_marker};
+use xara_phy::hf::level::{Bandwidth, Record};
+use xara_phy::hf::tx::Modulator;
 
 const CALLER: &str = "N0CALL";
 const ANSWERER: &str = "N1CALL";
@@ -21,6 +23,8 @@ struct Air {
     lines: Vec<String>,
     json: Vec<String>,
     seen: Seen,
+    /// When set, what each station put on the air, kept apart, for tests that edit and replay it.
+    audio: Option<[Vec<f64>; 2]>,
 }
 
 impl Air {
@@ -37,6 +41,7 @@ impl Air {
             lines: Vec::new(),
             json: Vec::new(),
             seen: Seen::default(),
+            audio: None,
         }
     }
 
@@ -48,6 +53,10 @@ impl Air {
         self.link.step();
         let (w, rng, noise) = (&self.link.wire, &mut self.link.rng, self.link.noise);
         let tail = |i: usize| w[i].range(w[i].len() - BLOCK..);
+        if let Some(a) = &mut self.audio {
+            a[0].extend(tail(0));
+            a[1].extend(tail(1));
+        }
         let heard: Vec<f64> = tail(0).zip(tail(1)).map(|(a, b)| a + b + noise * rng.gauss()).collect();
         self.mon.feed(&heard);
         self.drain();
@@ -190,47 +199,10 @@ fn monitor_drops_idle_keys_after_the_link() {
     }
 }
 
-/// Real VARA leaves about 28 ms more between a broadcast's announcement and its data frame than
-/// XARA's transmitter does (measured on air: 5.016 s end to end against 4.988 s). With that gap
-/// the data frame no longer covers the announcement, and the blind detector used to read the
-/// level 2 announcement as a connect request: its codeword seed (0xCD80A4) is the seed of a
-/// 500 Hz connect to callsign hash 0xCD809D.
-#[test]
-fn monitor_does_not_read_kiss_broadcasts_as_connects() {
-    let mut air = Air::new(Bandwidth::Hz500, Compression::Off, 0.002);
-    let sent = 4;
-    for i in 0..sent {
-        let text = format!("level two broadcast number {i:02}").into_bytes();
-        assert!(air.link.st[0].kiss(xara_arq::kiss::Command::Generic, text));
-    }
-    let kiss = |lines: &[String]| lines.iter().filter(|l| l.contains("KISS cmd")).count();
-    let mut audio = Vec::new();
-    while kiss(&air.lines) < sent && air.link.secs() < 90.0 {
-        air.link.step();
-        let w = &air.link.wire;
-        let tail = |i: usize| w[i].range(w[i].len() - BLOCK..);
-        let heard: Vec<f64> = tail(0).zip(tail(1)).map(|(a, b)| a + b).collect();
-        audio.extend_from_slice(&heard);
-        air.mon.feed(&heard);
-        air.drain();
-    }
-    assert_eq!(kiss(&air.lines), sent, "{}", air.log());
-    let ends: Vec<f64> = air
-        .lines
-        .iter()
-        .filter(|l| l.contains("UNPROTO") && l.contains("c47"))
-        .map(|l| l.split_whitespace().next().unwrap().parse().unwrap())
-        .collect();
-    assert_eq!(ends.len(), sent, "{}", air.log());
-    for t in ends.iter().rev() {
-        let at = ((t + 0.012) * 48000.0) as usize;
-        audio.splice(at..at, std::iter::repeat_n(0.0, 1440));
-    }
-    audio.extend(std::iter::repeat_n(0.0, 10 * 48000));
-
-    let mut mon = Monitor::new(Bandwidth::Hz500, &MonitorOpts::default());
-    let mut lines = Vec::new();
-    let mut ctrl = 0;
+/// Feeds recorded audio to a fresh monitor and returns its lines and the number of control records.
+fn replay(bw: Bandwidth, opts: &MonitorOpts, audio: &[f64]) -> (Vec<String>, usize) {
+    let mut mon = Monitor::new(bw, opts);
+    let (mut lines, mut ctrl) = (Vec::new(), 0);
     let mut take = |mon: &mut Monitor| {
         while let Some(l) = mon.pop() {
             ctrl += usize::from(matches!(l.rec, xara::monitor::record::Record::Ctrl { .. }));
@@ -243,24 +215,153 @@ fn monitor_does_not_read_kiss_broadcasts_as_connects() {
     }
     mon.finish();
     take(&mut mon);
-    let log = lines.join(
-        "
-",
-    );
-    assert_eq!(kiss(&lines), sent, "{log}");
-    assert_eq!(
-        ctrl, 0,
-        "a broadcast was reported as session control:
-{log}"
-    );
+    (lines, ctrl)
+}
+
+fn kiss_count(lines: &[String]) -> usize {
+    lines.iter().filter(|l| l.contains("KISS cmd")).count()
+}
+
+/// Real VARA leaves about 28 ms more between a broadcast's announcement and its data frame than
+/// XARA's transmitter does (measured on air: 5.016 s end to end against 4.988 s). With that gap
+/// the data frame no longer covers the announcement, and the blind detector used to read the
+/// level 2 announcement as a connect request: its codeword seed (0xCD80A4) is the seed of a
+/// 500 Hz connect to callsign hash 0xCD809D.
+#[test]
+fn monitor_does_not_read_kiss_broadcasts_as_connects() {
+    let mut air = Air::new(Bandwidth::Hz500, Compression::Off, 0.002);
+    air.audio = Some(Default::default());
+    let sent = 4;
+    for i in 0..sent {
+        let text = format!("level two broadcast number {i:02}").into_bytes();
+        assert!(air.link.st[0].kiss(xara_arq::kiss::Command::Generic, text));
+    }
+    assert!(air.run_until(90.0, |a| kiss_count(&a.lines) == sent), "{}", air.log());
+    let ends: Vec<f64> = air
+        .lines
+        .iter()
+        .filter(|l| l.contains("UNPROTO") && l.contains("c47"))
+        .map(|l| l.split_whitespace().next().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(ends.len(), sent, "{}", air.log());
+    let [mut audio, _] = air.audio.take().unwrap();
+    for t in ends.iter().rev() {
+        let at = ((t + 0.012) * 48000.0) as usize;
+        audio.splice(at..at, std::iter::repeat_n(0.0, 1440));
+    }
+    audio.extend(std::iter::repeat_n(0.0, 10 * 48000));
+
+    let (lines, ctrl) = replay(Bandwidth::Hz500, &MonitorOpts::default(), &audio);
+    let log = lines.join("\n");
+    assert_eq!(kiss_count(&lines), sent, "{log}");
+    assert_eq!(ctrl, 0, "a broadcast was reported as session control:\n{log}");
+    assert!(!log.contains("learned") && !log.contains("link "), "phantom key or link:\n{log}");
+    assert!(!log.contains("answerer") && !log.contains("caller"), "broadcast data given a session role:\n{log}");
+}
+
+/// Runs a short 500 Hz session, then replays it with the caller's session header replaced by
+/// `frame`, modulated at the same level in the same place. An empty frame leaves silence there.
+fn session_with_header(frame: impl Fn(usize) -> Vec<u8>, opts: &MonitorOpts) -> String {
+    let bw = Bandwidth::Hz500;
+    let mut air = Air::new(bw, Compression::Text, 0.002);
+    air.audio = Some(Default::default());
+    let air = run_session(air, &text(60, CALLER), &text(300, ANSWERER), 5.0);
+    let log = air.log();
+    let at = air.lines.iter().position(|l| l.contains("HEADER")).unwrap_or_else(|| panic!("no header:\n{log}"));
+    let data = air.lines[..at].iter().rfind(|l| l.contains(" DATA ")).unwrap();
+    let mut words = data.split_whitespace();
+    let t_end: f64 = words.next().unwrap().parse().unwrap();
+    let level: usize = words.nth(1).unwrap()[1..].parse().unwrap();
+    let rec = Record::new(level).unwrap();
+    let l = bw.level(rec);
+
+    let [mut caller, answerer] = air.audio.clone().unwrap();
+    let mid = ((t_end - l.airtime() / 2.0) * 48000.0) as usize;
+    assert!(caller[mid] != 0.0, "the caller is not transmitting where the header should be");
+    // The transmission runs between the nearest 10 ms stretches of silence on either side.
+    let quiet = |w: &[f64]| w.iter().all(|&x| x == 0.0);
+    let start = (0..mid).rev().find(|&i| i >= 480 && quiet(&caller[i - 480..i])).unwrap();
+    let end = (mid..caller.len() - 480).find(|&i| quiet(&caller[i..i + 480])).unwrap();
+    let rms = |x: &[f64]| (x.iter().map(|v| v * v).sum::<f64>() / x.len() as f64).sqrt();
+    let level_rms = rms(&caller[start..end]);
+
+    let mut seed = 7u32;
+    let mut rand = |n: u32| {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (seed >> 8) % n.max(1)
+    };
+    let frame = frame(l.frame_bytes() as usize);
+    caller[start..end].fill(0.0);
+    if !frame.is_empty() {
+        let tx = Modulator::new(bw).transmission(rec, &[&frame], &mut rand);
+        let gain = level_rms / rms(&tx);
+        assert!(tx.len().abs_diff(end - start) < 4800, "replacement {} samples, original {}", tx.len(), end - start);
+        for (o, v) in caller[start..].iter_mut().zip(&tx) {
+            *o = v * gain;
+        }
+    }
+    let mix: Vec<f64> = caller.iter().zip(&answerer).map(|(a, b)| a + b).collect();
+    replay(bw, opts, &mix).0.join("\n")
+}
+
+fn header_frame(len: usize, edit: impl Fn(&mut [u8; 8])) -> Vec<u8> {
+    let mut p = header_payload(CALLER.as_bytes(), 0x80 | 1 << 1 | 1);
+    edit(&mut p);
+    let ctrl = Control { reply: 2, compressed: false, hint: 0 };
+    build_frame(len, &p, ctrl, Some(6), term_marker(CALLER.as_bytes()))
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// The fields a later VARA could stamp with a version or date are exactly the ones XARA's session
+/// layer refuses. The monitor must show such a header, say what is unusual and keep following.
+#[test]
+fn monitor_shows_a_header_the_session_layer_would_refuse() {
+    let log = session_with_header(|len| header_frame(len, |p| p[6] = 0x2a), &MonitorOpts::default());
+    let header = log.lines().find(|l| l.contains("HEADER")).unwrap_or_else(|| panic!("no header line:\n{log}"));
+    assert!(header.contains("HEADER N0CALL"), "{header}");
+    assert!(header.contains("[UNUSUAL: byte 6 = 2a]"), "{header}");
+    let raw = hex(&header_frame(46, |p| p[6] = 0x2a)[..8]);
+    assert!(header.ends_with(&format!("raw {raw}")), "{header}");
+    assert!(!log.contains("NO HEADER"), "{log}");
+    assert!(log.contains("learned caller key N0CALL"), "the caller was not followed:\n{log}");
+    assert!(log.lines().any(|l| l.contains("CALLER") && l.ends_with("N0CALL")), "no caller control frames:\n{log}");
+}
+
+#[test]
+fn monitor_shows_raw_bytes_of_an_ordinary_header_with_diag() {
+    let plain = session_with_header(|len| header_frame(len, |_| {}), &MonitorOpts::default());
+    let header = plain.lines().find(|l| l.contains("HEADER")).unwrap_or_else(|| panic!("no header line:\n{plain}"));
+    assert!(!header.contains("UNUSUAL") && !header.contains("raw"), "{header}");
+    let opts = MonitorOpts { diag: true, ..MonitorOpts::default() };
+    let diag = session_with_header(|len| header_frame(len, |_| {}), &opts);
+    let header = diag.lines().find(|l| l.contains("HEADER")).unwrap();
+    let raw = hex(&header_frame(46, |_| {})[..8]);
+    assert!(header.ends_with(&format!("raw {raw}")) && !header.contains("UNUSUAL"), "{header}");
+}
+
+#[test]
+fn monitor_says_when_the_frame_after_a_connect_reply_is_no_header() {
+    let body = b"this is not a session header";
+    let ctrl = Control { reply: 2, compressed: false, hint: 0 };
+    let log = session_with_header(|len| build_frame(len, body, ctrl, Some(1), 0), &MonitorOpts::default());
+    let line = log.lines().find(|l| l.contains("NO HEADER")).unwrap_or_else(|| panic!("not reported:\n{log}"));
+    assert!(line.contains(&format!("raw {}", hex(body))), "{line}");
+    assert!(!log.contains("HEADER N0CALL"), "{log}");
+    assert_eq!(log.matches("NO HEADER").count(), 1, "only the frame in header position is flagged:\n{log}");
+}
+
+/// A listener often misses the header itself. The frames that follow are ordinary session data
+/// and must not be reported as a failed header.
+#[test]
+fn monitor_does_not_flag_later_frames_when_the_header_was_not_heard() {
+    let log = session_with_header(|_| Vec::new(), &MonitorOpts::default());
+    assert!(!log.contains("HEADER"), "{log}");
     assert!(
-        !log.contains("learned") && !log.contains("link "),
-        "phantom key or link:
-{log}"
-    );
-    assert!(
-        !log.contains("answerer") && !log.contains("caller"),
-        "broadcast data given a session role:
+        log.lines().filter(|l| l.contains(" ctl ")).count() >= 2,
+        "the session's data was not shown:
 {log}"
     );
 }

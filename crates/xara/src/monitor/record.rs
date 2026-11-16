@@ -98,6 +98,13 @@ pub enum Record {
         flags: u8,
         start: u8,
         marker_ok: bool,
+        raw: String,
+        unusual: Vec<String>,
+        show_raw: bool,
+    },
+    NoHeader {
+        raw: String,
+        len: usize,
     },
     Payload {
         sender: Option<Role>,
@@ -199,6 +206,7 @@ impl Record {
             Record::Data { .. } => "data",
             Record::FrameDiag { .. } => "frame",
             Record::Header { .. } => "header",
+            Record::NoHeader { .. } => "noheader",
             Record::Payload { .. } => "payload",
             Record::LinkEnd { .. } => "link_end",
             Record::Learned { .. } => "learned",
@@ -249,13 +257,18 @@ impl Record {
                 "  frame {index} [{}] est SN {snr:+.1} raw {raw_snr:+.1} afc res {afc_res:+.2} it {iterations}",
                 if *ok { '+' } else { '-' }
             ),
-            Record::Header { call, answerer, flags, start, marker_ok } => format!(
-                "  HEADER {call} → {answerer}: flags {flags:02x} ({}, compression {}, encryption {}), start level {start}{}",
+            Record::Header { call, answerer, flags, start, marker_ok, raw, unusual, show_raw } => format!(
+                "  HEADER {call} → {answerer}: flags {flags:02x} ({}, compression {}, encryption {}), start level {start}{}{}{}",
                 if flags & 1 != 0 { "registered" } else { "unregistered" },
                 Compression::from_flags(*flags).label(),
                 flags >> 4 & 3,
-                if *marker_ok { "" } else { ", terminator marker mismatch" }
+                if *marker_ok { "" } else { ", terminator marker mismatch" },
+                if unusual.is_empty() { String::new() } else { format!(" [UNUSUAL: {}]", unusual.join("; ")) },
+                if *show_raw || !unusual.is_empty() { format!(" raw {raw}") } else { String::new() }
             ),
+            Record::NoHeader { raw, len } => {
+                format!("  NO HEADER: the frame after the connect reply is not a session header; {len} B, raw {raw}")
+            }
             Record::Payload { ctl, reply, hint, compressed, last, full, body, .. } => {
                 let flags = format!(
                     "ctl {ctl:02x} r{reply} h{hint}{}{}{}",
@@ -348,7 +361,7 @@ impl Record {
                 .num2("afc_res", *afc_res)
                 .int("iterations", *iterations as u64)
                 .end(),
-            Record::Header { call, answerer, flags, start, marker_ok } => o
+            Record::Header { call, answerer, flags, start, marker_ok, raw, unusual, .. } => o
                 .str("call", call)
                 .str("answerer", answerer)
                 .int("flags", u64::from(*flags))
@@ -357,7 +370,10 @@ impl Record {
                 .int("encryption", u64::from(flags >> 4 & 3))
                 .int("start", u64::from(*start))
                 .bool("marker_ok", *marker_ok)
+                .str("raw", raw)
+                .str("unusual", &unusual.join("; "))
                 .end(),
+            Record::NoHeader { raw, len } => o.int("len", *len as u64).str("raw", raw).end(),
             Record::Payload { sender, ctl, reply, hint, compressed, last, full, body } => {
                 let o = opt_role(o, "sender", *sender)
                     .int("ctl", u64::from(*ctl))
@@ -455,6 +471,34 @@ mod tests {
             line(&r, None),
             r#"{"t":"payload","ts":12.5,"text":"  ctl 99 r2 h6 last n3 full: 4 B \"a\\r\\xff\\\"\"","sender":null,"ctl":153,"reply":2,"hint":6,"compressed":false,"last":3,"full":true,"status":"data","len":4,"data":"a\rÿ\""}"#
         );
+    }
+
+    #[test]
+    fn header_records_show_what_is_unusual() {
+        let h = |unusual: &[&str], show_raw| Record::Header {
+            call: "N0CALL".into(),
+            answerer: "N1CALL".into(),
+            flags: 0x83,
+            start: 6,
+            marker_ok: true,
+            raw: "39b0c130c0002a83".into(),
+            unusual: unusual.iter().map(|s| s.to_string()).collect(),
+            show_raw,
+        };
+        let plain = "  HEADER N0CALL → N1CALL: flags 83 (registered, compression TEXT, encryption 0), start level 6";
+        assert_eq!(h(&[], false).text(), plain);
+        assert_eq!(h(&[], true).text(), format!("{plain} raw 39b0c130c0002a83"));
+        assert_eq!(h(&["byte 6 = 2a"], false).text(), format!("{plain} [UNUSUAL: byte 6 = 2a] raw 39b0c130c0002a83"));
+        let j = line(&h(&["byte 6 = 2a", "valid flag clear"], false), None);
+        assert!(
+            j.ends_with(r#""marker_ok":true,"raw":"39b0c130c0002a83","unusual":"byte 6 = 2a; valid flag clear"}"#),
+            "{j}"
+        );
+        assert!(line(&h(&[], false), None).ends_with(r#""raw":"39b0c130c0002a83","unusual":""}"#));
+
+        let n = Record::NoHeader { raw: "0102".into(), len: 46 };
+        assert_eq!(n.text(), "  NO HEADER: the frame after the connect reply is not a session header; 46 B, raw 0102");
+        assert!(line(&n, None).ends_with(r#""t":"noheader","ts":12.5,"text":"  NO HEADER: the frame after the connect reply is not a session header; 46 B, raw 0102","len":46,"raw":"0102"}"#));
     }
 
     #[test]
