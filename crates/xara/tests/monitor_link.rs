@@ -189,3 +189,78 @@ fn monitor_drops_idle_keys_after_the_link() {
         assert!(i > ended, "{note} before the link ended:\n{log}");
     }
 }
+
+/// Real VARA leaves about 28 ms more between a broadcast's announcement and its data frame than
+/// XARA's transmitter does (measured on air: 5.016 s end to end against 4.988 s). With that gap
+/// the data frame no longer covers the announcement, and the blind detector used to read the
+/// level 2 announcement as a connect request: its codeword seed (0xCD80A4) is the seed of a
+/// 500 Hz connect to callsign hash 0xCD809D.
+#[test]
+fn monitor_does_not_read_kiss_broadcasts_as_connects() {
+    let mut air = Air::new(Bandwidth::Hz500, Compression::Off, 0.002);
+    let sent = 4;
+    for i in 0..sent {
+        let text = format!("level two broadcast number {i:02}").into_bytes();
+        assert!(air.link.st[0].kiss(xara_arq::kiss::Command::Generic, text));
+    }
+    let kiss = |lines: &[String]| lines.iter().filter(|l| l.contains("KISS cmd")).count();
+    let mut audio = Vec::new();
+    while kiss(&air.lines) < sent && air.link.secs() < 90.0 {
+        air.link.step();
+        let w = &air.link.wire;
+        let tail = |i: usize| w[i].range(w[i].len() - BLOCK..);
+        let heard: Vec<f64> = tail(0).zip(tail(1)).map(|(a, b)| a + b).collect();
+        audio.extend_from_slice(&heard);
+        air.mon.feed(&heard);
+        air.drain();
+    }
+    assert_eq!(kiss(&air.lines), sent, "{}", air.log());
+    let ends: Vec<f64> = air
+        .lines
+        .iter()
+        .filter(|l| l.contains("UNPROTO") && l.contains("c47"))
+        .map(|l| l.split_whitespace().next().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(ends.len(), sent, "{}", air.log());
+    for t in ends.iter().rev() {
+        let at = ((t + 0.012) * 48000.0) as usize;
+        audio.splice(at..at, std::iter::repeat_n(0.0, 1440));
+    }
+    audio.extend(std::iter::repeat_n(0.0, 10 * 48000));
+
+    let mut mon = Monitor::new(Bandwidth::Hz500, &MonitorOpts::default());
+    let mut lines = Vec::new();
+    let mut ctrl = 0;
+    let mut take = |mon: &mut Monitor| {
+        while let Some(l) = mon.pop() {
+            ctrl += usize::from(matches!(l.rec, xara::monitor::record::Record::Ctrl { .. }));
+            lines.push(format!("{:9.3} {}", l.t, l.text));
+        }
+    };
+    for b in audio.chunks(BLOCK) {
+        mon.feed(b);
+        take(&mut mon);
+    }
+    mon.finish();
+    take(&mut mon);
+    let log = lines.join(
+        "
+",
+    );
+    assert_eq!(kiss(&lines), sent, "{log}");
+    assert_eq!(
+        ctrl, 0,
+        "a broadcast was reported as session control:
+{log}"
+    );
+    assert!(
+        !log.contains("learned") && !log.contains("link "),
+        "phantom key or link:
+{log}"
+    );
+    assert!(
+        !log.contains("answerer") && !log.contains("caller"),
+        "broadcast data given a session role:
+{log}"
+    );
+}

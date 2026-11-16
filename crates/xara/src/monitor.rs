@@ -917,6 +917,11 @@ impl Monitor {
         match ev {
             Event::Ctrl(c) => {
                 let d = &c.det;
+                // A broadcast announcement is a control codeword with a fixed seed, and some of
+                // those seeds are also the seed of a connect request to some callsign hash (level 2:
+                // 0xCD80A4 = 500 Hz connect to hash 0xCD809D). Mark it as explained so the blind
+                // detector does not report a connect and learn a phantom key from it.
+                self.mark(d.t_end - (d.fmt.params().nsym as i64 - 1) * SYM3, d.t_end);
                 if self.bc.on_ctrl(d.code, c.t_end48()) {
                     let rec = Record::Unproto { code: d.code, fmt: d.fmt, hits: d.hits, snr: d.snr_norm };
                     self.push(d.t_end, Ev::Rec(rec));
