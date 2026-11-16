@@ -11,6 +11,7 @@ const GROUP = {
 
 const log = new LogView($("log"), 3000, 800);
 const rx = meter("rx");
+const ascii = asciiScope("ascii");
 const GROUPS = ["ctrl", "data", "payload", "unproto", "notes"];
 const groups = new Set(savedGroups());
 let collapse = pref.get("xara-monitor.collapse", "on") !== "off";
@@ -107,6 +108,7 @@ function status(s) {
   unproto = s.unproto;
   wf.setPassband(s.passband[0], s.passband[1]);
   rx(s.rx);
+  ascii.level(s.rx.rms);
   $("clip").classList.toggle("on", s.rx.clip > 0);
   $("behind").classList.toggle("on", s.lag > BEHIND_S);
   $("ended").classList.toggle("on", s.ended);
@@ -127,16 +129,47 @@ function status(s) {
   }
 }
 
+// A small animated ASCII scope: a scrolling sparkline of the RX level, plus the
+// current state. Driven at ~11 fps; shows a gentle wave while the channel is quiet.
+function asciiScope(id) {
+  const el = $(id);
+  if (!el) return { level() {}, state() {} };
+  const W = 52;
+  const BLK = " ▁▂▃▄▅▆▇█"; // 0..8
+  const buf = new Array(W).fill(0);
+  let cur = FLOOR, live = 0, label = "listening", t = 0;
+  const lvl = (db) => Math.max(0, Math.min(8, Math.round((db - FLOOR) / -FLOOR * 8)));
+  function frame() {
+    t++;
+    const idle = performance.now() - live > 1200;
+    const v = idle ? 1 + (((Math.sin(t / 7) + 1) * 1.4) | 0) : lvl(cur);
+    buf.push(v);
+    buf.shift();
+    const bars = buf.map((x) => BLK[x]).join("");
+    const mark = "▪▫"[(t >> 2) & 1];
+    const db = idle || cur <= FLOOR ? "  --  " : `${cur.toFixed(1)} dB`.padStart(8);
+    el.textContent = `RX │${bars}│ ${db}\n   ${mark} ${label}`;
+  }
+  setInterval(frame, 90);
+  frame();
+  return {
+    level(db) { cur = db; if (db > FLOOR + 1) live = performance.now(); },
+    state(s) { label = s; },
+  };
+}
+
 function link(l, now) {
   const state = $("state");
   if (!l) {
     state.textContent = "Quiet";
     state.className = "state idle";
+    ascii.state("listening");
     $("since").textContent = "";
     $("bytes-ca").textContent = "-";
     $("bytes-ac").textContent = "-";
     return;
   }
+  ascii.state(`${l.caller ?? "?"} → ${l.answerer ?? "?"}`);
   linkStart = l.start;
   const name = `${l.caller ?? "?"} → ${l.answerer ?? "?"}`;
   linkName = name;
