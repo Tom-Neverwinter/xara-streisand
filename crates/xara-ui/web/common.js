@@ -42,6 +42,7 @@ function initTheme() {
     if (v === "system") delete root.dataset.theme;
     else root.dataset.theme = v;
     pref.set("xara.theme", v);
+    window.dispatchEvent(new Event("themechange"));
   });
 }
 initTheme();

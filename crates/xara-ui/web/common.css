@@ -49,10 +49,40 @@
   --k-caller: #ffb066; --k-answerer: #ff8c1a; --k-ok: #ffa040; --k-bad: #ff4b3a; --k-unproto: #ff9a4d;
   --glow: 0 0 2px #ff7a1a, 0 0 9px rgba(255, 110, 0, .8), 0 0 22px rgba(255, 70, 0, .45);
 }
+:root[data-theme="airport"] {
+  color-scheme: dark;
+  --bg: #0a0a0b; --card: #111214; --line: #262a30; --text: #f2efe6; --dim: #868d98;
+  --good: #39d353; --warn: #ffc145; --bad: #ff4d4d; --accent: #ffc145; --bar: #191b1f;
+  --led-off: #20242a; --band: #ffc145;
+  --k-caller: #7ec8ff; --k-answerer: #ffc145; --k-ok: #39d353; --k-bad: #ff4d4d; --k-unproto: #c9a3ff;
+  --glow: none;  /* a matte split-flap board: no glow, high contrast */
+}
+:root[data-theme="deco"] {
+  color-scheme: dark;
+  --bg: #0b0e0d; --card: #121614; --line: #2c3a33; --text: #efe6cf; --dim: #9b9478;
+  --good: #5fcaa0; --warn: #d4af37; --bad: #c56b5b; --accent: #d4af37; --bar: #161a18;
+  --led-off: #1b201d; --band: #d4af37;
+  --k-caller: #8fc7b2; --k-answerer: #d4af37; --k-ok: #5fcaa0; --k-bad: #c56b5b; --k-unproto: #bfa6d0;
+  --glow: 0 0 1px rgba(212, 175, 55, .45);
+}
 /* The glow is `none` outside a theme, so these elements are unaffected by default. */
 .brand, .state, .tile b, .led.on, .val, .ascii, #wf-cursor { text-shadow: var(--glow); }
 :root[data-theme="nixie"] .tile b,
 :root[data-theme="nixie"] .state { font-family: var(--mono); letter-spacing: .04em; }
+
+/* Airport: a split-flap departure board -- monospace, uppercase, flap seams. */
+:root[data-theme="airport"] .tile b,
+:root[data-theme="airport"] .state { font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+:root[data-theme="airport"] .tile,
+:root[data-theme="airport"] .ascii,
+:root[data-theme="airport"] #log {
+  background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, .34) 0 1px, transparent 1px 11px);
+}
+/* Art deco: gold serif headings with thin rules. */
+:root[data-theme="deco"] .brand,
+:root[data-theme="deco"] h2,
+:root[data-theme="deco"] h3 { font-family: Georgia, "Times New Roman", serif; letter-spacing: .12em; color: var(--accent); }
+:root[data-theme="deco"] .card-head { border-bottom: 1px solid rgba(212, 175, 55, .3); padding-bottom: 6px; }
 
 .theme { max-width: 10em; }
 
@@ -62,6 +92,10 @@
   background: var(--bg); color: var(--accent);
   font-family: var(--mono); font-size: 13px; line-height: 1.45;
   white-space: pre; overflow: hidden; letter-spacing: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill { transition: none; }
 }
 
 * { box-sizing: border-box; }
