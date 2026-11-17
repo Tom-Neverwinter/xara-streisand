@@ -88,6 +88,21 @@ jobs:
           for t in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
             cargo +"$RUST" check --locked --no-default-features -p xara -p xara-ui --target "$t"
           done
+      # A linked arm64 build with AAudio, against the NDK the runner image ships (API 26: AAudio's minimum).
+      - name: linked arm64 build (NDK, AAudio)
+        env:
+          NDK: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: |
+          cc="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+          test -x "$cc"
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$cc"             cargo +"$RUST" build --locked --release --no-default-features -p xara --target aarch64-linux-android
+          file target/aarch64-linux-android/release/xara
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xara-aarch64-linux-android
+          path: |
+            target/aarch64-linux-android/release/xara
+            target/aarch64-linux-android/release/xara-monitor
 
   msrv:
     runs-on: ubuntu-24.04

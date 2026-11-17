@@ -87,3 +87,12 @@ card on OTG. Every Android output is a real device, so playback needs
 
 Linking needs the NDK (`cargo ndk ... build`) since `libaaudio.so` comes from
 it. Written, not yet run on a device.
+
+CI builds and links an arm64 binary the same way (NDK clang for API 26 as the
+linker) and keeps it as the `xara-aarch64-linux-android` artifact of each run.
+Without cargo-ndk:
+
+```sh
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang
+cargo build --release --no-default-features -p xara --target aarch64-linux-android
+```
