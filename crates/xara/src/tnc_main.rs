@@ -64,6 +64,8 @@ struct Args {
     trusdx_speaker: bool,
     record: Option<PathBuf>,
     log: Option<PathBuf>,
+    syslog: Option<String>,
+    syslog_name: Option<String>,
     hf_given: bool,
     list_devices: bool,
 }
@@ -101,6 +103,8 @@ fn defaults() -> Args {
         trusdx_speaker: false,
         record: None,
         log: None,
+        syslog: None,
+        syslog_name: None,
         hf_given: false,
         list_devices: false,
     }
@@ -162,6 +166,8 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--trusdx-speaker" => a.trusdx_speaker = true,
         "--record" => a.record = Some(PathBuf::from(v()?)),
         "--log" => a.log = Some(PathBuf::from(v()?)),
+        "--syslog" => a.syslog = Some(v()?),
+        "--syslog-name" => a.syslog_name = Some(v()?),
         "--list-devices" => a.list_devices = true,
         #[cfg(feature = "registered")]
         "--registered" => a.registered = true,
@@ -744,6 +750,10 @@ fn real_main() -> Result<ExitCode, String> {
     xara::log::init("xara", base.quiet);
     if let Some(p) = &base.log {
         xara::log::open(p).map_err(|e| format!("--log {}: {e}", p.display()))?;
+    }
+    if let Some(to) = &base.syslog {
+        let station = base.syslog_name.clone().unwrap_or_else(|| base.call.clone());
+        xara::log::syslog(to, &station).map_err(|e| format!("--syslog {to}: {e}"))?;
     }
     if let Some(p) = &config {
         say!("config {}", p.display());

@@ -166,6 +166,8 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
     --log FILE              append UTC-timestamped output to FILE
+    --syslog HOST[:PORT]    also send the log to a syslog server over UDP (RFC 5424, port 514)
+    --syslog-name NAME      station name in syslog messages (default: your call)
     --quiet                 only output warnings and errors
     --version and --help    guess
 

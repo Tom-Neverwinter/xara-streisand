@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
+use std::net::{ToSocketAddrs, UdpSocket};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -10,6 +11,39 @@ static NAME: OnceLock<&'static str> = OnceLock::new();
 static QUIET: AtomicBool = AtomicBool::new(false);
 static LOGGING: AtomicBool = AtomicBool::new(false);
 static FILE: Mutex<Option<File>> = Mutex::new(None);
+static SYSLOG: OnceLock<Syslog> = OnceLock::new();
+
+/// Log lines also go to a syslog server over UDP, as VARA's "Enable SysLog" does: RFC 5424, facility user,
+/// severity info, the station name as HOSTNAME.
+struct Syslog {
+    sock: UdpSocket,
+    station: String,
+}
+
+pub const SYSLOG_PORT: u16 = 514;
+
+/// `addr` is HOST or HOST:PORT (default port 514); `station` names this station in each message.
+pub fn syslog(addr: &str, station: &str) -> io::Result<()> {
+    let with_port = if addr.rsplit_once(':').is_some_and(|(_, p)| p.parse::<u16>().is_ok()) && !addr.ends_with(']') {
+        addr.to_string()
+    } else {
+        format!("{addr}:{SYSLOG_PORT}")
+    };
+    let to = with_port.to_socket_addrs()?.next().ok_or_else(|| io::Error::other(format!("{addr}: no address")))?;
+    let sock = UdpSocket::bind(if to.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" })?;
+    sock.connect(to)?;
+    // RFC 5424 HOSTNAME: printable ASCII, no spaces, at most 255
+    let station: String = station.chars().filter(|c| c.is_ascii_graphic()).take(255).collect();
+    let station = if station.is_empty() { "-".into() } else { station };
+    SYSLOG.set(Syslog { sock, station }).map_err(|_| io::Error::other("syslog already set"))
+}
+
+fn syslog_line(at: SystemTime, args: &fmt::Arguments) {
+    if let Some(s) = SYSLOG.get() {
+        // <14> = facility user (1) * 8 + severity info (6); best effort, a lost datagram is fine
+        let _ = s.sock.send(format!("<14>1 {} {} {} - - - {args}", stamp(at), s.station, name()).as_bytes());
+    }
+}
 
 pub fn init(name: &'static str, quiet: bool) {
     let _ = NAME.set(name);
@@ -32,6 +66,7 @@ pub fn line(console: bool, args: fmt::Arguments) {
     if console {
         let _ = writeln!(io::stderr().lock(), "{args}");
     }
+    syslog_line(SystemTime::now(), &args);
     if !to_file() {
         return;
     }
@@ -50,7 +85,7 @@ pub fn write(info: bool, args: fmt::Arguments) {
 }
 
 pub fn note(args: fmt::Arguments) {
-    if to_file() {
+    if to_file() || SYSLOG.get().is_some() {
         line(false, format_args!("{}: {args}", name()));
     }
 }
@@ -101,6 +136,18 @@ mod tests {
 
     fn at(secs: u64, ms: u64) -> String {
         stamp(UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_millis(ms))
+    }
+
+    #[test]
+    fn syslog_sends_rfc5424_lines() {
+        let rx = UdpSocket::bind("127.0.0.1:0").unwrap();
+        rx.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        syslog(&rx.local_addr().unwrap().to_string(), "N0 CALL").unwrap();
+        line(false, format_args!("xara: hello"));
+        let mut b = [0u8; 256];
+        let n = rx.recv(&mut b).unwrap();
+        let s = String::from_utf8_lossy(&b[..n]);
+        assert!(s.starts_with("<14>1 ") && s.ends_with(" N0CALL xara - - - xara: hello"), "{s}");
     }
 
     #[test]
