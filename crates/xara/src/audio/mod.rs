@@ -15,9 +15,11 @@ pub mod ratematch;
 pub mod trusdx;
 pub mod txpath;
 
-// Off Unix (Windows) there is no audio backend yet: the build is for
-// xara-monitor reading WAV files or stdin, and open_capture() says so.
-#[cfg(all(unix, not(any(pulse, alsa, coreaudio, feature = "trusdx"))))]
+// Some targets build with no audio backend: Windows, and Android (a headless
+// modem reached over the KISS/TCP TNC, with audio handled off-device). There
+// the build is for xara-monitor reading WAV files or stdin, and open_capture()
+// says so. On a desktop Unix, no backend is a misconfiguration, so refuse it.
+#[cfg(all(unix, not(target_os = "android"), not(any(pulse, alsa, coreaudio, feature = "trusdx"))))]
 compile_error!("xara needs an audio backend: enable the pulse or alsa feature, or build on macOS for CoreAudio");
 
 use std::collections::VecDeque;
