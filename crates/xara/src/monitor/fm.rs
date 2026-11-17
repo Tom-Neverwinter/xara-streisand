@@ -16,7 +16,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use xara_arq::fm::broadcast::{self, Received};
-use xara_phy::fm::frame::{Kind, Record0};
+use xara_phy::call::call_hash;
+use xara_phy::fm::ctrl::{Codebook, Side};
+use xara_phy::fm::ctrl::code::{BREAK, GO_AHEAD, QRT};
+use xara_phy::fm::frame::{parse_data, Kind, Record0};
 use xara_phy::fm::level::{FmBandwidth, Record};
 use xara_phy::fm::rx::receiver::{Event, Receiver, Transmission};
 
@@ -33,6 +36,7 @@ pub enum Kinds {
     Connect,
     Cq,
     Broadcast,
+    Data,
     Note,
 }
 
@@ -42,9 +46,38 @@ impl Kinds {
             Kinds::Connect => "connect",
             Kinds::Cq => "cq",
             Kinds::Broadcast => "broadcast",
+            Kinds::Data => "data",
             Kinds::Note => "note",
         }
     }
+}
+
+/// A session being followed after its connect was heard. VARA FM data frames
+/// all use one key (the answerer's call hash), so with that key the receiver
+/// decodes both directions; which party is talking is tracked from the turn
+/// handover control codes (`GO_AHEAD` yields, `BREAK` seizes), seeded by the
+/// fact that the caller talks first.
+struct Follow {
+    caller: String,
+    answerer: String,
+    vias: bool,
+    /// 0 = caller is talking, 1 = answerer.
+    talker: usize,
+    /// Last payload chunk appended per side, to drop ARQ retransmissions.
+    last: [Vec<u8>; 2],
+}
+
+impl Follow {
+    fn call(&self, side: usize) -> &str {
+        if side == 0 { &self.caller } else { &self.answerer }
+    }
+}
+
+/// Every record a followed link can carry, so the receiver assembles them.
+fn link_records(bw: FmBandwidth) -> Vec<Record> {
+    let mut v = vec![Record::Connect, Record::Broadcast, Record::Short, Record::Start];
+    v.extend((1..=bw.num_levels()).filter_map(Record::from_index));
+    v
 }
 
 /// One line of monitor output.
@@ -107,6 +140,7 @@ pub struct FmMonitor {
     known: BTreeSet<String>,
     out: VecDeque<Line>,
     stats: Stats,
+    follow: Option<Follow>,
 }
 
 fn secs(t_end: i64) -> f64 {
@@ -125,6 +159,7 @@ impl FmMonitor {
             known: o.known.iter().map(|c| c.to_ascii_uppercase()).collect(),
             out: VecDeque::new(),
             stats: Stats::default(),
+            follow: None,
         }
     }
 
@@ -158,9 +193,11 @@ impl FmMonitor {
     fn on(&mut self, ev: Event) {
         match ev {
             Event::Tx(t) => self.on_tx(t),
-            // Per-frame events are rolled up into the Tx event; control
-            // detections need a link key we do not have here.
-            Event::Frame(_) | Event::Ctrl(_) => {}
+            // Control frames are only decodable once we are following a link
+            // (its codebook is installed); they carry the turn handover.
+            Event::Ctrl(c) => self.on_ctrl(secs(c.det.t_end), c.det.code),
+            // Per-frame events are rolled up into the Tx event.
+            Event::Frame(_) => {}
         }
     }
 
@@ -172,8 +209,23 @@ impl FmMonitor {
         match t.record {
             Record::Connect => self.on_connect(at, &t),
             Record::Broadcast => self.on_broadcast(at, &t),
-            // We only expect Connect/Broadcast; anything else means a keyed
-            // record we cannot read without the link key.
+            // Any other record is session data; readable only while following
+            // a link (otherwise the wrong key makes it undecodable anyway).
+            _ => self.on_data(at, &t),
+        }
+    }
+
+    // Turn handover: GO_AHEAD yields the turn to the other party, BREAK seizes
+    // it; either way the talker flips. QRT ends the session.
+    fn on_ctrl(&mut self, at: f64, code: u32) {
+        let Some(f) = &mut self.follow else { return };
+        match code {
+            GO_AHEAD | BREAK => f.talker ^= 1,
+            QRT => {
+                let (c, a) = (f.caller.clone(), f.answerer.clone());
+                self.follow = None;
+                self.emit(at, Kinds::Note, format!("link ended {} <-> {}", disp(&c), disp(&a)));
+            }
             _ => {}
         }
     }
@@ -208,6 +260,52 @@ impl FmMonitor {
         let band = if r.wide { "wide" } else { "narrow" };
         let text = format!("{verb} {} -> {}{via} ({band})", disp(&r.source), disp(&r.target));
         self.emit(at, Kinds::Connect, text);
+        // Only an actual connect sets up a session to follow (not a ping etc.),
+        // and only when both calls are known.
+        if r.kind == Kind::Connect && !r.source.is_empty() && !r.target.is_empty() {
+            self.start_follow(&r.source, &r.target, r.vias() > 0);
+        }
+    }
+
+    // Re-key the receiver to a link's data key and install its control
+    // codebook, so its data frames and turn handovers decode. The keyless
+    // Connect/Broadcast records still decode too, so a later connect simply
+    // re-points the follower.
+    fn start_follow(&mut self, caller: &str, answerer: &str, vias: bool) {
+        let (c, a) = (caller.to_ascii_uppercase(), answerer.to_ascii_uppercase());
+        // Both parties key data with the answerer's call hash.
+        self.rx.set_key(call_hash(a.as_bytes()));
+        self.rx.expect(&link_records(self.bw), Some(1));
+        // Codebook::for_link(upstream, downstream) == new(hash(down), hash(up)).
+        let cb = Codebook::for_link(c.as_bytes(), a.as_bytes());
+        let codes: Vec<u32> = (1..=24).collect();
+        self.rx.set_ctrl(Side::Source, Some(cb), &codes);
+        self.follow = Some(Follow {
+            caller: c,
+            answerer: a,
+            vias,
+            talker: 0,
+            last: [Vec::new(), Vec::new()],
+        });
+    }
+
+    fn on_data(&mut self, at: f64, t: &Transmission) {
+        // Borrow the two fields disjointly: the follow state and the output
+        // queue (going through self.emit would reborrow all of self).
+        let (Some(f), out) = (self.follow.as_mut(), &mut self.out) else { return };
+        for frame in t.frames.iter().filter(|fr| fr.ok) {
+            let Some(df) = parse_data(t.record, &frame.bytes, f.vias) else { continue };
+            if df.data.is_empty() || df.data == f.last[f.talker] {
+                continue; // empty fill, or an ARQ retransmission of the last chunk
+            }
+            f.last[f.talker] = df.data.clone();
+            let body = if df.control.compressed {
+                format!("<{} compressed bytes>", df.data.len())
+            } else {
+                as_text(&df.data)
+            };
+            out.push_back(Line { t: at, kind: Kinds::Data, text: format!("{}> {}", disp(f.call(f.talker)), body) });
+        }
     }
 
     fn on_broadcast(&mut self, at: f64, t: &Transmission) {
@@ -245,9 +343,20 @@ fn disp(call: &str) -> &str {
     if call.is_empty() { "?" } else { call }
 }
 
+/// Render payload bytes for display: keep printable ASCII and common
+/// whitespace, replace the rest with a dot (as the HF monitor's payload pane
+/// does).
+fn as_text(b: &[u8]) -> String {
+    b.iter()
+        .map(|&c| if c == b'\n' || c == b'\t' || (0x20..=0x7e).contains(&c) { c as char } else { '·' })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xara_phy::fm::ctrl::{frame_audio, Codebook as TxCodebook};
+    use xara_phy::fm::frame::{build_data, Trailer};
     use xara_phy::fm::tx::{Modulator, TxOptions};
 
     // A tiny deterministic PRNG for the modulator's lead-in randomisation; the
@@ -304,6 +413,52 @@ mod tests {
         assert!(heard["N2CALL"].roles.contains("CQ"));
         assert_eq!(mon.stats().connects, 1);
         assert_eq!(mon.stats().cq, 1);
+    }
+
+    #[test]
+    fn follows_a_session_and_attributes_payloads() {
+        let bw = FmBandwidth::Narrow;
+        let m = Modulator::new(bw);
+        let mut rand = rng();
+        let opt = TxOptions { drive_db: -5.0, pre_signal: false };
+        // Data key is the answerer's (N1) hash; control uses for_link(caller, answerer).
+        let key = call_hash(b"N1CALL");
+        let cb = TxCodebook::for_link(b"N0CALL", b"N1CALL");
+        let rec = Record::from_index(2).unwrap();
+        let flen = bw.level(rec).frame_bytes();
+        let data = |msg: &[u8]| {
+            build_data(rec, flen, msg, false, 3, false, Trailer { lead_report: 1, level: 0, chain_snr: None })
+        };
+
+        let mut x = vec![0.0; 24000];
+        let r0 = Record0::connect("N0CALL", "N1CALL", "", "", false, false).to_bytes().unwrap();
+        x.extend(m.transmission(Record::Connect, 0, &[&r0[..]], 21, opt, &mut rand));
+        x.extend(std::iter::repeat_n(0.0, 24000));
+        // Caller N0 talks first.
+        let d0 = data(b"HELLO FROM N0");
+        x.extend(m.transmission(rec, key, &[&d0[..]], 2, opt, &mut rand));
+        x.extend(std::iter::repeat_n(0.0, 12000));
+        // Turn handover, then answerer N1 talks.
+        x.extend(frame_audio(&cb, GO_AHEAD, 2, -5.0));
+        x.extend(std::iter::repeat_n(0.0, 12000));
+        let d1 = data(b"HI N0 THIS IS N1");
+        x.extend(m.transmission(rec, key, &[&d1[..]], 2, opt, &mut rand));
+        x.extend(std::iter::repeat_n(0.0, 12000));
+        x.extend(frame_audio(&cb, QRT, 2, -5.0));
+        x.extend(std::iter::repeat_n(0.0, 24000));
+
+        let mut mon = FmMonitor::new(bw, &Opts::default());
+        let lines = feed_all(&mut mon, &x);
+        let data_lines: Vec<&str> = lines.iter().filter(|l| l.kind == Kinds::Data).map(|l| l.text.as_str()).collect();
+        assert!(
+            data_lines.iter().any(|t| t == &"N0CALL> HELLO FROM N0"),
+            "caller payload missing/mis-attributed: {data_lines:?}"
+        );
+        assert!(
+            data_lines.iter().any(|t| t == &"N1CALL> HI N0 THIS IS N1"),
+            "answerer payload missing/mis-attributed: {data_lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.kind == Kinds::Note && l.text.contains("link ended")), "no link-end note");
     }
 
     #[test]

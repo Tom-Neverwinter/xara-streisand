@@ -44,9 +44,11 @@ timestamped details about the observed packets.
 
 **--fm** narrow|wide
 
-:   Monitor VARA FM instead of HF. Reports connects and CQ heard on the air
-    (text or JSON; the web UI and session payloads are HF-only for now).
-    Mutually exclusive with **--hf**.
+:   Monitor VARA FM instead of HF. Reports connects and CQ, and follows a
+    session's data after its connect is heard -- keying from the two calls and
+    attributing each payload to the caller or answerer by the turn handover
+    (text or JSON). The web UI is HF-only for now; compressed payloads are
+    shown as a byte count. Mutually exclusive with **--hf**.
 
 **--call** *CALL*
 
