@@ -396,7 +396,19 @@ fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
         }
     }
     m.finish();
-    drain_fm(&mut m, &mut o, epoch, a.json)
+    drain_fm(&mut m, &mut o, epoch, a.json)?;
+    // A summary on stderr (so --json stdout stays clean) that the corpus
+    // regression check can parse, mirroring the HF monitor's "frames N/M ok".
+    let s = m.stats();
+    say!(
+        "summary: {} transmissions, frames {}/{} ok, {} connects, {} cq",
+        s.transmissions,
+        s.frames_ok,
+        s.frames,
+        s.connects,
+        s.cq
+    );
+    Ok(())
 }
 
 fn run(a: Args, stop: &Arc<AtomicBool>) -> std::io::Result<()> {
