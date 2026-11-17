@@ -557,9 +557,9 @@ fn setup_with(
     };
     if !ptt.is_empty() {
         if ask_yes(input, out, "this keys a real transmitter: enable radio mode?")? {
-            text += &format!("radio\nptt = {ptt}\n");
+            text += &format!("radio = yes\nptt = {ptt}\n");
         } else {
-            text += &format!("# radio\n# ptt = {ptt}\n");
+            text += &format!("# radio = yes\n# ptt = {ptt}\n");
         }
     }
     Ok(text)
@@ -1063,7 +1063,7 @@ mod tests {
         assert_eq!(
             text,
             "# written by xara --setup; keys are xara options without the leading --\ncall = N0XRA\nfm = wide\n\
-             audio = winmm\ncapture = Line In\nplayback = Speakers\nradio\nptt = rts:COM3\n"
+             audio = winmm\ncapture = Line In\nplayback = Speakers\nradio = yes\nptt = rts:COM3\n"
         );
         let text = setup_with(&mut "N0XRA\n\n1\n1\n\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).unwrap();
         assert!(text.contains("hf = 2300\n") && !text.contains("radio"));
