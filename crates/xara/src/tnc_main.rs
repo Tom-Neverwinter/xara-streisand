@@ -334,6 +334,14 @@ fn state_dir(a: &Args) -> Option<PathBuf> {
     (!dir.is_empty()).then(|| PathBuf::from(dir))
 }
 
+// Windows: the per-user directory's ACLs keep it private; there are no mode bits to check.
+#[cfg(windows)]
+fn make_state_dir(d: &Path) -> Result<Option<String>, String> {
+    std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
+    Ok(None)
+}
+
+#[cfg(unix)]
 fn make_state_dir(d: &Path) -> Result<Option<String>, String> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     let err = |e: std::io::Error| format!("{}: {e}", d.display());
@@ -671,6 +679,7 @@ fn open_audio(
 }
 
 fn restart(argv: &[String], token: Option<&str>, record_part: Option<u32>) -> ExitCode {
+    #[cfg(unix)]
     use std::os::unix::process::CommandExt;
     say!("restarting");
     let err = match std::env::current_exe() {
@@ -682,10 +691,19 @@ fn restart(argv: &[String], token: Option<&str>, record_part: Option<u32>) -> Ex
             if let Some(n) = record_part {
                 c.env(RECORD_PART_ENV, n.to_string());
             }
+            #[cfg(unix)]
             if let Some(a0) = std::env::args_os().next() {
                 c.arg0(a0);
             }
-            c.args(argv).exec()
+            #[cfg(unix)]
+            let e = c.args(argv).exec();
+            // Windows has no exec: run the new instance and hand on its exit status.
+            #[cfg(windows)]
+            let e = match c.args(argv).status() {
+                Ok(s) => return ExitCode::from(s.code().unwrap_or(1) as u8),
+                Err(e) => e,
+            };
+            e
         }
         Err(e) => e,
     };
@@ -764,7 +782,10 @@ fn real_main() -> Result<ExitCode, String> {
         say!("{e}");
     }
     let stop = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
     let sigs = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
+    #[cfg(windows)]
+    let sigs = [];
     let signaled = signals::trap(&sigs, stop.clone(), || {
         xara::ptt::wait_released(SECOND_SIGNAL_GRACE);
     })
@@ -993,6 +1014,7 @@ mod tests {
         assert_eq!(with_config(&argv("--config /nonexistent/xara.conf -h")), Ok((None, argv("-h"))));
     }
 
+    #[cfg(unix)]
     #[test]
     fn state_dir_is_created_private_and_a_shared_one_warned_about() {
         use std::os::unix::fs::PermissionsExt;

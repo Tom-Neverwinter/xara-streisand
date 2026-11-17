@@ -1,11 +1,15 @@
 use std::io;
 use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::server::ACCEPT_BACKOFF;
 
+#[cfg(unix)]
 const POLL_MS: libc::c_int = 1000;
 
 struct Gate {
@@ -62,17 +66,44 @@ fn bounce(g: &Gate) {
     }
 }
 
+#[cfg(unix)]
 fn pending(l: &TcpListener) -> bool {
     let mut p = libc::pollfd { fd: l.as_raw_fd(), events: libc::POLLIN, revents: 0 };
     // SAFETY: p is one valid pollfd for the duration of the call.
     unsafe { libc::poll(&mut p, 1, POLL_MS) > 0 }
 }
 
+#[cfg(unix)]
 fn reset(c: &TcpStream) {
     let linger = libc::linger { l_onoff: 1, l_linger: 0 };
     let len = std::mem::size_of_val(&linger) as libc::socklen_t;
     // SAFETY: c is an open socket and linger outlives the call.
     unsafe { libc::setsockopt(c.as_raw_fd(), libc::SOL_SOCKET, libc::SO_LINGER, (&raw const linger).cast(), len) };
+}
+
+// Windows: the listener is non-blocking, so a short sleep stands in for poll() and accept() says WouldBlock.
+#[cfg(windows)]
+fn pending(_: &TcpListener) -> bool {
+    thread::sleep(std::time::Duration::from_millis(10));
+    true
+}
+
+#[cfg(windows)]
+fn reset(c: &TcpStream) {
+    #[repr(C)]
+    struct Linger {
+        on: u16,
+        secs: u16,
+    }
+    #[link(name = "ws2_32")]
+    unsafe extern "system" {
+        fn setsockopt(s: usize, level: i32, name: i32, val: *const u8, len: i32) -> i32;
+    }
+    const SOL_SOCKET: i32 = 0xffff;
+    const SO_LINGER: i32 = 0x0080;
+    let l = Linger { on: 1, secs: 0 };
+    // SAFETY: c is an open socket and l outlives the call.
+    unsafe { setsockopt(c.as_raw_socket() as usize, SOL_SOCKET, SO_LINGER, (&raw const l).cast(), 4) };
 }
 
 #[cfg(test)]

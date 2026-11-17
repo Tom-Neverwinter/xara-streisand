@@ -1,13 +1,9 @@
-// The TCP server and its listener pause are built on Unix sockets (libc
-// poll, SO_LINGER, raw fds).  Off Unix (Windows) the crate offers only the
-// protocol pieces -- parsing, responses, KISS, the writer -- which is what
-// xara-monitor needs; the TNC itself is Unix-only for now.
-#[cfg(all(unix, any(not(target_os = "linux"), test)))]
+// Linux pauses a listener with shutdown(); other platforms (macOS, BSD, Windows) use the bouncer.
+#[cfg(any(windows, all(unix, any(not(target_os = "linux"), test))))]
 mod bouncer;
 pub mod command;
 pub mod kiss;
 pub mod response;
-#[cfg(unix)]
 pub mod server;
 pub mod writer;
 

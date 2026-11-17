@@ -1,7 +1,4 @@
-// Off Unix (Windows) PTT, the TNC and signal trapping are not built: they
-// use Unix APIs (ioctl, termios, sigaction, Unix sockets), so a Windows build
-// cannot key a radio.  What is left -- the station modem, the monitor, WAV
-// and FLAC I/O -- is what `xara-monitor --wav` and the tests need.
+// On Windows: WinMM audio, serial (RTS/DTR) / rigctld / VOX PTT and console-event trapping; CM108 is Unix-only.
 #[macro_use]
 pub mod log;
 pub mod audio;
@@ -14,14 +11,15 @@ mod hid;
 #[cfg(unix)]
 mod hidraw;
 pub mod monitor;
-#[cfg(unix)]
 pub mod ptt;
 pub mod record;
 pub mod resample;
 #[cfg(unix)]
 pub mod signals;
+#[cfg(windows)]
+#[path = "signals_win.rs"]
+pub mod signals;
 pub mod station;
-#[cfg(unix)]
 pub mod tnc;
 pub mod wav;
 
