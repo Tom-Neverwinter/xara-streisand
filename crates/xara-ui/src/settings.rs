@@ -155,7 +155,7 @@ fn device_ok(v: &str) -> bool {
     // apply; Windows names carry spaces and brackets ("Line (Voicemod Virtual Audio De").  `add` already
     // refused control characters.
     if cfg!(windows) {
-        return !v.trim().is_empty() && v.trim() == v;
+        return v.trim() == v; // empty means unset, as on Unix
     }
     v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.,:=@+-".contains(&b))
         && !v.split([':', ',', '=']).any(|t| t == "file" || t == "tee")
@@ -217,9 +217,11 @@ mod tests {
             parse_save("call N0CALL\n capture  hw:1,0 \nplayback\n").unwrap(),
             parse(&render(&kv(&[("call", "N0CALL"), ("capture", "hw:1,0"), ("playback", "")]))).unwrap()
         );
-        for bad in ["radio yes", "call A\ncall B", "capture file:x"] {
+        for bad in ["radio yes", "call A\ncall B"] {
             assert!(parse_save(bad).is_err(), "{bad:?}");
         }
+        // an ALSA file plugin on Unix; on Windows only a name WinMM won't find
+        assert_eq!(parse_save("capture file:x").is_err(), cfg!(unix));
         for dev in [
             "plughw:CARD=Device,DEV=0",
             "hw:1,0",
@@ -260,7 +262,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_device_names_round_trip() {
-        let p = parse("capture = Microphone (Voicemod Virtual Au\nplayback = Line (Voicemod Virtual Audio De\n").unwrap();
+        let p =
+            parse("capture = Microphone (Voicemod Virtual Au\nplayback = Line (Voicemod Virtual Audio De\n").unwrap();
         assert_eq!(
             p,
             kv(&[("capture", "Microphone (Voicemod Virtual Au"), ("playback", "Line (Voicemod Virtual Audio De")])
