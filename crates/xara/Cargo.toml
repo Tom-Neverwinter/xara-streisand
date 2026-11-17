@@ -26,7 +26,6 @@ xara-testkit.workspace = true
 default = ["pulse", "alsa"]
 pulse = []
 alsa = ["dep:alsa-sys"]
-registered = []
 trusdx = []
 fixed-turbo = ["xara-phy/fixed-turbo"]
 float-turbo = ["xara-phy/float-turbo"]

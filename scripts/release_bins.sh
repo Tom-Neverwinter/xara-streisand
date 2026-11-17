@@ -1,10 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-registered=
-if [ "${1:-}" = --registered ]; then
-    registered=1
-    shift
-fi
 target=$1
 root=$(cd "$(dirname "$0")/.." && pwd)
 out=$(mkdir -p "${2:-$root/target/dist}" && cd "${2:-$root/target/dist}" && pwd)
@@ -23,14 +18,6 @@ if [ -n "$cc" ] && [ "$(uname -m)" = x86_64 ]; then
     export PKG_CONFIG_LIBDIR=/usr/lib/$cc/pkgconfig:/usr/share/pkgconfig
 fi
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
-if [ -n "$registered" ]; then
-    dir=$root/target/registered
-    trap 'rm -rf "$dir"' EXIT
-    CARGO_TARGET_DIR=$dir cargo build --manifest-path "$root/Cargo.toml" --locked --release \
-        --target "$target" -p xara --features registered >&2
-    (cd "$dir/$target/release" && sha256sum xara) | sed "s|  xara\$|  registered/$name/xara|"
-    exit
-fi
 cargo build --manifest-path "$root/Cargo.toml" --locked --release --target "$target" -p xara
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
