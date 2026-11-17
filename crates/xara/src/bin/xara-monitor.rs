@@ -18,13 +18,9 @@ use xara::say;
 use xara::signals;
 use xara_phy::hf::level::Bandwidth;
 use xara_phy::hf::rx::FS;
-#[cfg(unix)]
 use xara_ui::bus;
-#[cfg(unix)]
 use xara_ui::messages::Info;
-#[cfg(unix)]
 use xara_ui::server::{MONITOR, TICK, UiServer};
-#[cfg(unix)]
 use xara_ui::telemetry::EVENT_QUEUE;
 
 const QUEUE: usize = 1200;
@@ -217,15 +213,6 @@ struct Ui {
     status: JoinHandle<()>,
 }
 
-#[cfg(not(unix))]
-fn serve(a: &Args, _: &str, _: Option<f64>, _: &Arc<AtomicBool>) -> io::Result<Option<Ui>> {
-    match a.ui.port {
-        None => Ok(None),
-        Some(_) => Err(io::Error::new(io::ErrorKind::Unsupported, "--ui-port: the web UI is Unix-only for now")),
-    }
-}
-
-#[cfg(unix)]
 fn serve(a: &Args, source: &str, epoch: Option<f64>, stop: &Arc<AtomicBool>) -> io::Result<Option<Ui>> {
     let Some(port) = a.ui.port else { return Ok(None) };
     let (publisher, sub) = bus::channel(EVENT_QUEUE);
