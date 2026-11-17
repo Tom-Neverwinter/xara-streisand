@@ -1,5 +1,5 @@
 //! The xara modem and passive monitor: CLI, audio backends, PTT and the station loop that ties the other crates together.
-// On Windows: WinMM audio, serial (RTS/DTR) / rigctld / VOX PTT and console-event trapping; CM108 is Unix-only.
+// On Windows: WinMM audio, serial (RTS/DTR) / rigctld / VOX PTT and console-event trapping; CM108 by USB id.
 #[macro_use]
 pub mod log;
 pub mod audio;
@@ -9,6 +9,8 @@ pub mod cli;
 pub mod flac;
 #[cfg(target_os = "macos")]
 mod hid;
+#[cfg(windows)]
+mod hid_win;
 #[cfg(unix)]
 mod hidraw;
 pub mod monitor;
