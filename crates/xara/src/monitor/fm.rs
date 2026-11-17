@@ -62,6 +62,8 @@ struct Follow {
     caller: String,
     answerer: String,
     vias: bool,
+    /// Stream time (seconds) the session's connect was heard.
+    start: f64,
     /// 0 = caller is talking, 1 = answerer.
     talker: usize,
     /// The link's compression, from the connect: 1 = text, 2 = files, else off.
@@ -226,9 +228,18 @@ impl FmMonitor {
             .int("transmissions", s.transmissions as u64)
             .int("connects", s.connects as u64)
             .int("cq", s.cq as u64);
+        let link = match &self.follow {
+            Some(f) => Obj::new()
+                .str("caller", &f.caller)
+                .str("answerer", &f.answerer)
+                .num2("start", f.start)
+                .nums2("bytes", &[0.0, 0.0])
+                .end(),
+            None => "null".to_string(),
+        };
         Obj::new()
             .num2("decoded", now)
-            .raw("link", "null")
+            .raw("link", &link)
             .raw("keys", "[]")
             .raw("heard", &format!("[{}]", heard.join(",")))
             .obj("stats", stats)
@@ -313,7 +324,7 @@ impl FmMonitor {
         // Only an actual connect sets up a session to follow (not a ping etc.),
         // and only when both calls are known.
         if r.kind == Kind::Connect && !r.source.is_empty() && !r.target.is_empty() {
-            self.start_follow(&r.source, &r.target, r.vias() > 0, r.compression);
+            self.start_follow(at, &r.source, &r.target, r.vias() > 0, r.compression);
         }
     }
 
@@ -321,7 +332,7 @@ impl FmMonitor {
     // codebook, so its data frames and turn handovers decode. The keyless
     // Connect/Broadcast records still decode too, so a later connect simply
     // re-points the follower.
-    fn start_follow(&mut self, caller: &str, answerer: &str, vias: bool, comp: u8) {
+    fn start_follow(&mut self, at: f64, caller: &str, answerer: &str, vias: bool, comp: u8) {
         let (c, a) = (caller.to_ascii_uppercase(), answerer.to_ascii_uppercase());
         // Both parties key data with the answerer's call hash.
         self.rx.set_key(call_hash(a.as_bytes()));
@@ -334,6 +345,7 @@ impl FmMonitor {
             caller: c,
             answerer: a,
             vias,
+            start: at,
             talker: 0,
             comp,
             last: [Vec::new(), Vec::new()],
@@ -572,5 +584,16 @@ mod tests {
         assert!(j.contains("\"t\":\"cq\""), "{j}");
         assert!(j.contains("\"ts\":1.5"), "{j}");
         assert!(j.contains("N2CALL"), "{j}");
+    }
+
+    #[test]
+    fn decoder_json_shape_for_the_ui() {
+        // Idle monitor: no session, empty heard, zeroed stats, valid JSON.
+        let mon = FmMonitor::new(FmBandwidth::Narrow, &Opts::default());
+        let j = mon.decoder_json();
+        assert!(j.contains("\"link\":null"), "{j}");
+        assert!(j.contains("\"keys\":[]"), "{j}");
+        assert!(j.contains("\"heard\":[]"), "{j}");
+        assert!(j.contains("\"frames\":0") && j.contains("\"searches\":0"), "{j}");
     }
 }
