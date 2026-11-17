@@ -108,4 +108,4 @@ closed; 1 on an error; 2 on a bad command line; 130 on a second signal.
 
 **xara**(1), **sox**(1)
 
-README.md in the xara source, https://github.com/x0rro/xara
+README.md in the xara source, https://github.com/Tom-Neverwinter/xara-streisand

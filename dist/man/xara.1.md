@@ -256,4 +256,4 @@ If you kill with SIGKILL, PTT may not be released!
 
 **xara-monitor**(1), **rigctld**(1), **pactl**(1), **aplay**(1)
 
-README.md in the xara source, https://github.com/x0rro/xara
+README.md in the xara source, https://github.com/Tom-Neverwinter/xara-streisand

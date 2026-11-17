@@ -1,36 +1,97 @@
 # contributing
 
-thank you for your interest in contributing to xara! this project's goal
-is NOT to be a superior VARA, an everything-modem, or an app. it is
-primarily meant to be a reference implementation of VARA's protocol and
-to provide linux users the ability to communicate with remote VARA and
-xara stations. i consider it a stopgap until the world moves on to more
-modern, open protocols.
+thanks for helping. xara-streisand keeps the open XARA modem alive after
+upstream withdrew it: VARA-compatible, documented, and buildable on any
+common OS. it is a reference implementation of VARA's protocol and a
+bridge for stations that still speak it. it is not an everything-modem or
+an app. if you want to build those on top of xara, please do, in your own
+repo.
 
-if any of this project's non-goals sound like your interest, fear not! i
-would be delighted if you integrated all or parts of xara in your
-project. however i ask that you do so in your own repo, as those are out
-of scope for this one.
+## what we take
 
-## so what will you take then?
+- bug fixes, with a test that fails without the fix
+- platform work: Windows, macOS, BSDs, ARM boards, Android/Termux, new
+  audio backends, PTT methods
+- interop reports: "client X against xara on OS Y with radio Z: works or
+  fails like this", with logs (`--log`) and, if you can, a recording
+  (`--record`) of **your own** test traffic
+- packaging, CI, docs, and tests
 
-i am open to considering bug fixes and desktop/embedded platform
-enhancements on linux and similar OSes, including macOS. i will also
-review patches and improvements to the packaging, testing, CI, and other
-project infrastructure.
+open an issue first for anything large, so nobody duplicates work.
 
-i do accept AI-generated submissions, but i will reject slop. what this
-means is that i expect a human to have read and reviewed all code and
-documentation, and furthermore said human is willing to vouch for it as
-not-slop.
+## the one hard rule: clean sources only
 
-please do not send me AI-generated wordslop. this includes florid
-verbiage in documentation, lengthy comments on issues, and commit
-messages that come with an ISBN.
+**do not contribute anything derived from disassembling or decompiling
+VARA**, and do not paste VARA's files (`.dat` tables, DLLs, installers) into
+issues or PRs. everything here must come from:
 
-## and pull requests?
+- the MIT XARA code and its recorded test vectors,
+- signals anyone may receive, or your own lab loopback,
+- VARA's published documentation and its observable behaviour (TCP
+  commands, audio in and out).
 
-if your contribution passes all the gates described above, then it is a
-candidate for acceptance. even if you pass the gates, i may rewrite your
-PR to suit my taste. if this happens to you, please take it as an act of
-flattery for having come up with such a great idea :)
+if you cannot say where a constant or a table came from, it does not go
+in. this keeps the project safe for everyone who builds on it. PRs that
+can't show clean provenance will be closed.
+
+## getting started
+
+    git clone https://github.com/Tom-Neverwinter/xara-streisand
+    cd xara-streisand
+    cargo test --workspace
+
+no radio or sound card is needed: the test suite replays recorded vectors
+(`vectors/`) and runs whole links over simulated audio. see
+[BUILDING.md](BUILDING.md) for your OS's system packages.
+
+### where things live
+
+| crate | what | start reading at |
+|---|---|---|
+| `xara-phy` | DSP: FEC/turbo, OFDM/FSK/PSK modulation and receivers, HF and FM | `src/hf/`, `src/fm/` |
+| `xara-arq` | sans-IO ARQ state machines, compression, AX.25/KISS, broadcasts | `src/hf/`, `src/fm/`, `src/session.rs` |
+| `xara-host` | VARA command/data and KISS TCP servers | `src/server.rs`, `src/command.rs` |
+| `xara-ui` | telemetry bus, web UI server, settings | `src/server.rs` |
+| `xara` | the binaries: CLI, audio backends, PTT, station glue | `src/tnc_main.rs`, `src/audio/`, `src/ptt.rs` |
+| `xara-testkit` | test-only helpers | |
+
+### before you open a PR
+
+run what CI runs (Linux shown; drop the pulse/alsa lines on macOS and
+Windows):
+
+    cargo fmt --all --check
+    rustfmt --edition 2024 --check crates/xara/src/tnc_main.rs   # main.rs include!s it
+    cargo clippy --locked --workspace --all-targets -- -D warnings
+    cargo clippy --locked -p xara --all-targets --no-default-features --features pulse -- -D warnings
+    cargo clippy --locked -p xara --all-targets --no-default-features --features alsa -- -D warnings
+    cargo test --locked --release --workspace
+
+CI covers Linux (x86_64, arm64, armv7 under qemu), macOS, Windows, a
+FreeBSD type-check and the MSRV build. if you can only test one OS, say so
+in the PR.
+
+### cross-platform code
+
+- gate platform code with `#[cfg(unix)]`, `#[cfg(windows)]` or
+  `#[cfg(target_os = "...")]` and keep the other platforms compiling.
+  look at `crates/xara/src/audio/mod.rs` for the pattern.
+- if a feature is missing on a platform, fail with a clear message that
+  says what to use instead (see `--ptt cm108` on Windows). don't fail
+  silently.
+- no new dependencies for a few lines of code. the workspace keeps its
+  dependency list short on purpose (see `Cargo.toml`).
+
+## style
+
+- comments say *why*, not what. one line where one line does.
+- commit messages: a short summary line, then a body only if it helps.
+- AI-assisted contributions are fine if a human has read, tested and
+  stands behind every line. no slop: no florid docs, no novel-length
+  comments or commit messages.
+
+## credit
+
+xara was written by x0rro and released under the MIT license. this fork
+keeps that license and that credit. by contributing you agree your work
+is released under the same MIT license.
