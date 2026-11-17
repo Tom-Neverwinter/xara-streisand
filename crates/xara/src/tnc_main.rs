@@ -7,6 +7,7 @@ use xara::audio::ratematch::{self, TxBuffer};
 use xara::audio::txpath::TxPath;
 use xara::audio::{self, Audio, Backend, Behind};
 use xara::cli::{self, UiArgs, Usage, num};
+use xara::shift::Shift;
 use xara::ptt::{PttCtl, PttSpec, PttTiming};
 use xara::record::{self, Recorder};
 use xara::say;
@@ -51,6 +52,8 @@ struct Args {
     persistence: f64,
     addr: String,
     drive_db: f64,
+    tx_shift: f64,
+    rx_shift: f64,
     quiet: bool,
     ui: UiArgs,
     ui_control: bool,
@@ -88,6 +91,8 @@ fn defaults() -> Args {
         persistence: xara_arq::hf::broadcast::DEFAULT_PERSISTENCE,
         addr: xara::DEFAULT_ADDR.into(),
         drive_db: DEFAULT_DRIVE_DB,
+        tx_shift: 0.0,
+        rx_shift: 0.0,
         quiet: false,
         ui: UiArgs::default(),
         ui_control: false,
@@ -143,6 +148,8 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--persistence" => a.persistence = finite(k, &v()?)?.clamp(0.0, 1.0),
         "--addr" => a.addr = v()?,
         "--drive-db" => a.drive_db = finite(k, &v()?)?,
+        "--tx-shift" => a.tx_shift = finite(k, &v()?)?,
+        "--rx-shift" => a.rx_shift = finite(k, &v()?)?,
         "--quiet" => a.quiet = true,
         "--ui-control" => a.ui_control = true,
         "--ui-token" => {
@@ -225,6 +232,9 @@ fn check(a: &Args) -> Result<(), String> {
     }
     if !a.digi.is_empty() && a.fm.is_none() {
         return Err("--digi needs --fm".into());
+    }
+    if a.tx_shift.abs() > xara::shift::MAX_HZ || a.rx_shift.abs() > xara::shift::MAX_HZ {
+        return Err(format!("--tx-shift and --rx-shift must be within +-{} Hz", xara::shift::MAX_HZ));
     }
     if a.drive_db > 0.0 {
         return Err("--drive-db must be <= 0".into());
@@ -566,11 +576,25 @@ fn serve<M: Modem>(
         }
         None => None,
     };
+    let rate = f64::from(xara::audio::RATE);
+    let (mut rx_shift, mut tx_shift) = (Shift::new(a.rx_shift, rate), Shift::new(a.tx_shift, rate));
+    let mut shifted = Vec::new();
     let pumped = pump(a, io.as_mut(), tx, stop, rec, |x, out, s| {
         if let Some(b) = s.budget {
             tnc.set_tx_latency(b.total(), b.lag());
         }
-        tnc.process(x, out);
+        match &mut rx_shift {
+            Some(r) => {
+                shifted.clear();
+                shifted.extend_from_slice(x);
+                r.process(&mut shifted);
+                tnc.process(&shifted, out);
+            }
+            None => tnc.process(x, out),
+        }
+        if let Some(t) = &mut tx_shift {
+            t.process(out);
+        }
         tnc.force_ptt_off(s.forced_off);
         Tick { keyed: tnc.keyed(), tuning: tnc.station().tuning(), restart: tnc.restart_requested() }
     });
