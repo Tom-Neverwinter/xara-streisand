@@ -232,6 +232,8 @@ options:
     --verbose               report unconfirmed blind detections
     --json                  print newline-delimited JSON records
     --log FILE              append UTC-timestamped output to FILE
+    --syslog HOST[:PORT]    also send the log to a syslog server over UDP
+    --syslog-name NAME      station name in syslog messages (default: xara-monitor)
     --version and --help    guess
 
 ## registered mode

@@ -48,6 +48,7 @@ struct Args {
     json: bool,
     ui: UiArgs,
     log: Option<PathBuf>,
+    syslog: Option<(String, String)>,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -56,6 +57,7 @@ fn parse() -> Result<Option<Args>, String> {
     let mut audio = None;
     let (mut blind, mut dump, mut verbose, mut key_idle) = (true, false, false, xara::monitor::KEY_IDLE_S);
     let (mut json, mut log) = (false, None);
+    let (mut syslog, mut syslog_name) = (None, String::from("xara-monitor"));
     let mut ui = UiArgs::default();
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -108,6 +110,8 @@ fn parse() -> Result<Option<Args>, String> {
             "--verbose" => verbose = true,
             "--json" => json = true,
             "--log" => log = Some(PathBuf::from(v()?)),
+            "--syslog" => syslog = Some(v()?),
+            "--syslog-name" => syslog_name = v()?,
             _ => return Err(format!("unknown option {k}")),
         }
     }
@@ -122,7 +126,8 @@ fn parse() -> Result<Option<Args>, String> {
         return Err("--hf and --fm cannot both be given".into());
     }
     let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose };
-    Ok(Some(Args { input, audio, bw, fm, mon, json, ui, log }))
+    let syslog = syslog.map(|s| (s, syslog_name));
+    Ok(Some(Args { input, audio, bw, fm, mon, json, ui, log, syslog }))
 }
 
 fn utc(t: f64) -> String {
@@ -583,6 +588,12 @@ fn main() -> ExitCode {
     if let Some(p) = &a.log {
         if let Err(e) = xara::log::open(p) {
             say!("--log {}: {e}", p.display());
+            return ExitCode::FAILURE;
+        }
+    }
+    if let Some((to, name)) = &a.syslog {
+        if let Err(e) = xara::log::syslog(to, name) {
+            say!("--syslog {to}: {e}");
             return ExitCode::FAILURE;
         }
     }
