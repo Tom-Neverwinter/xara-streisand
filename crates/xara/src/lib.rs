@@ -3,6 +3,7 @@
 #[macro_use]
 pub mod log;
 pub mod audio;
+pub mod cat;
 #[cfg(target_os = "macos")]
 mod cf;
 pub mod cli;
@@ -15,6 +16,7 @@ pub mod monitor;
 pub mod ptt;
 pub mod record;
 pub mod resample;
+pub mod serial;
 #[cfg(unix)]
 pub mod signals;
 #[cfg(windows)]

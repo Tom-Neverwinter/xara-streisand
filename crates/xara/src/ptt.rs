@@ -45,10 +45,19 @@ pub enum PttSpec {
     Vox,
     Rts(String),
     Dtr(String),
-    Cm108 { path: String, gpio: u8 },
-    Cm108Usb { vendor: u16, product: u16, gpio: u8 },
+    Cm108 {
+        path: String,
+        gpio: u8,
+    },
+    Cm108Usb {
+        vendor: u16,
+        product: u16,
+        gpio: u8,
+    },
     Rigctld(String),
     Trusdx,
+    /// Built-in CAT; `None` until `--cat` fills it in (`--ptt cat` with a separate `--cat`).
+    Cat(Option<crate::cat::CatSpec>),
 }
 
 pub const RIGCTLD_DEFAULT: &str = "127.0.0.1:4532";
@@ -83,10 +92,15 @@ impl PttSpec {
                 Err("--ptt trusdx: xara was built without the trusdx feature".into())
             }
             "trusdx" if rest.is_empty() => Ok(Self::Trusdx),
+            "cat" if rest.is_empty() => Ok(Self::Cat(None)),
+            "cat" => crate::cat::CatSpec::parse(rest)
+                .map(|c| Self::Cat(Some(c)))
+                .map_err(|e| e.replace("--cat", "--ptt cat")),
             "rigctld" => Ok(Self::Rigctld(if rest.is_empty() { RIGCTLD_DEFAULT.into() } else { rest.into() })),
             _ => {
                 let cm108 = if cfg!(target_os = "macos") { "cm108:VID:PID[:GPIO]" } else { "cm108:DEV|VID:PID[:GPIO]" };
-                let mut all = vec!["vox", "rts:DEV", "dtr:DEV", cm108, "rigctld[:HOST:PORT]"];
+                let mut all =
+                    vec!["vox", "rts:DEV", "dtr:DEV", cm108, "rigctld[:HOST:PORT]", "cat[:KIND:PORT[:BAUD[:ADDR]]]"];
                 if cfg!(feature = "trusdx") {
                     all.push("trusdx");
                 }
@@ -123,6 +137,8 @@ impl PttSpec {
                 return Err(io::Error::other("--ptt cm108 is not supported on Windows"));
             }
             Self::Rigctld(a) => Box::new(Rigctld::open(a)?),
+            Self::Cat(Some(c)) => Box::new(c.open()?),
+            Self::Cat(None) => return Err(io::Error::other("--ptt cat needs --cat KIND:PORT[:BAUD[:ADDR]]")),
             Self::Trusdx => return Err(io::Error::other("--ptt trusdx comes with --audio trusdx")),
         })
     }
@@ -280,15 +296,7 @@ impl Rigctld {
 
     /// Tune the rig's dial to `hz` (rigctld `F`), e.g. once at startup with `--rig-freq`.
     pub fn set_frequency(&mut self, hz: u64) -> io::Result<()> {
-        let l = self
-            .exchange(
-                format!(
-                    "F {hz}
-"
-                )
-                .as_bytes(),
-            )
-            .inspect_err(|_| self.link = None)?;
+        let l = self.exchange(format!("F {hz}\n").as_bytes()).inspect_err(|_| self.link = None)?;
         match l.trim() {
             "RPRT 0" => Ok(()),
             r => Err(io::Error::other(format!("rigctld {}: F {hz}: {r}", self.addr))),
@@ -310,7 +318,7 @@ impl Ptt for Rigctld {
     }
 }
 
-const DEVICE_NS: &str = r"\\.\";
+pub(crate) const DEVICE_NS: &str = r"\\.\";
 
 /// `COM3` or `\\.\COM12`.
 #[cfg_attr(not(windows), allow(dead_code))]
