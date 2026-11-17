@@ -673,6 +673,16 @@ fn bad_option_values_are_refused() {
         assert_eq!(c, 2, "{rate}: {e}");
         assert!(e.contains("--stdin: sample rate"), "{rate}: {e}");
     }
+    for (extra, want) in [
+        (&["--fm", "sideways"][..], "--fm: expected narrow or wide"),
+        (&["--fm", "narrow", "--hf", "2300"], "--hf and --fm cannot both be given"),
+        (&["--hf", "500", "--fm", "wide"], "--hf and --fm cannot both be given"),
+        (&["--fm", "narrow", "--ui-port", "8080"], "the web UI is HF-only"),
+    ] {
+        let (c, _, e) = monitor(&[&["--stdin", "48000"][..], extra].concat());
+        assert_eq!(c, 2, "{extra:?}: {e}");
+        assert!(e.contains(want), "{extra:?}: {e}");
+    }
 }
 
 fn slow_rigctld(first_reply: &'static [&'static [u8]]) -> (String, Arc<Mutex<Vec<String>>>) {

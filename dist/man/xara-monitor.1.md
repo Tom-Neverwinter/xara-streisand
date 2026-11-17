@@ -42,6 +42,12 @@ timestamped details about the observed packets.
 
 :   HF bandwidth (default: 2300)
 
+**--fm** narrow|wide
+
+:   Monitor VARA FM instead of HF. Reports connects and CQ heard on the air
+    (text or JSON; the web UI and session payloads are HF-only for now).
+    Mutually exclusive with **--hf**.
+
 **--call** *CALL*
 
 :   Known call sign (repeatable)

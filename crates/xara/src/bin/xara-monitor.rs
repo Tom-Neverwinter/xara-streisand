@@ -8,8 +8,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 use xara::audio::{self, Backend};
 use xara::cli::{self, UiArgs, Usage, num};
+use xara::monitor::fm::{self, FmMonitor};
 use xara::monitor::ui::{Heard, Shared};
 use xara::monitor::{Monitor, MonitorOpts};
+use xara_phy::fm::level::FmBandwidth;
 use xara::resample::{Resampler, check_rate};
 use xara::say;
 #[cfg(unix)]
@@ -45,6 +47,7 @@ struct Args {
     input: Input,
     audio: Option<Backend>,
     bw: Bandwidth,
+    fm: Option<FmBandwidth>,
     mon: MonitorOpts,
     json: bool,
     ui: UiArgs,
@@ -53,6 +56,7 @@ struct Args {
 
 fn parse() -> Result<Option<Args>, String> {
     let (mut input, mut bw, mut calls, mut names) = (None, Bandwidth::Hz2300, Vec::new(), Vec::new());
+    let (mut fm, mut hf_given) = (None, false);
     let mut audio = None;
     let (mut blind, mut dump, mut verbose, mut key_idle) = (true, false, false, xara::monitor::KEY_IDLE_S);
     let (mut json, mut log) = (false, None);
@@ -74,7 +78,17 @@ fn parse() -> Result<Option<Args>, String> {
             }
             "--audio" => audio = Some(v()?.parse()?),
             "--capture" => input = Some(Input::Capture(v()?)),
-            "--hf" => bw = v()?.parse()?,
+            "--hf" => {
+                bw = v()?.parse()?;
+                hf_given = true;
+            }
+            "--fm" => {
+                fm = Some(match v()?.to_ascii_lowercase().as_str() {
+                    "narrow" => FmBandwidth::Narrow,
+                    "wide" => FmBandwidth::Wide,
+                    m => return Err(format!("--fm: expected narrow or wide, got {m}")),
+                });
+            }
             "--call" => calls.push(cli::call(&v()?)?),
             "--calls" => {
                 let path = v()?;
@@ -108,8 +122,14 @@ fn parse() -> Result<Option<Args>, String> {
     if ui.port.is_none() && (ui.addr.is_some() || !ui.hosts.is_empty()) {
         return Err("--ui-addr and --ui-host need --ui-port".into());
     }
+    if fm.is_some() && hf_given {
+        return Err("--hf and --fm cannot both be given".into());
+    }
+    if fm.is_some() && ui.port.is_some() {
+        return Err("--fm: the web UI is HF-only for now; use text output or --json".into());
+    }
     let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose };
-    Ok(Some(Args { input, audio, bw, mon, json, ui, log }))
+    Ok(Some(Args { input, audio, bw, fm, mon, json, ui, log }))
 }
 
 fn utc(t: f64) -> String {
@@ -271,7 +291,118 @@ fn pipe(
     Ok(ui)
 }
 
+fn drain_fm(m: &mut FmMonitor, o: &mut impl Write, epoch: Option<f64>, json: bool) -> io::Result<()> {
+    while let Some(l) = m.pop() {
+        if xara::log::to_file() {
+            match epoch {
+                Some(e) => xara::log::line(false, format_args!("{} {}", utc(e + l.t), l.text)),
+                None => xara::log::line(false, format_args!("{:9.3} {}", l.t, l.text)),
+            }
+        }
+        match (json, epoch) {
+            (true, e) => writeln!(o, "{}", l.json(e.map(|e| e + l.t)))?,
+            (false, Some(e)) => writeln!(o, "{} {}", utc(e + l.t), l.text)?,
+            (false, None) => writeln!(o, "{:9.3} {}", l.t, l.text)?,
+        }
+    }
+    o.flush()
+}
+
+fn start_fm(o: &mut impl Write, bw: FmBandwidth, known: &[String], epoch: Option<f64>) -> io::Result<()> {
+    let mut obj = xara_ui::json::Obj::typed("start")
+        .str("version", env!("CARGO_PKG_VERSION"))
+        .str("mode", "fm")
+        .str("bw", if bw == FmBandwidth::Wide { "wide" } else { "narrow" })
+        .strs("calls", known);
+    if let Some(e) = epoch {
+        obj = obj.num2("unix", e);
+    }
+    writeln!(o, "{}", obj.end())?;
+    o.flush()
+}
+
+// A passive FM monitor: decode synchronously and print lines. The web UI and
+// session-payload following are HF-only for now (issue #2). The audio rate is
+// the same 48 kHz the HF monitor uses, so the input handling mirrors it.
+fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
+    let known: Vec<String> = a.mon.calls.iter().chain(&a.mon.names).cloned().collect();
+    let mut m = FmMonitor::new(bw, &fm::Opts { known: known.clone() });
+    xara::log::line(
+        true,
+        format_args!(
+            "xara-monitor {}: FM {}, {} known calls",
+            env!("CARGO_PKG_VERSION"),
+            if bw == FmBandwidth::Wide { "wide" } else { "narrow" },
+            known.len(),
+        ),
+    );
+    let mut o = std::io::stdout().lock();
+    // A recorded file plays on its own time base (seconds from the start); live
+    // inputs stamp against wall-clock epoch.
+    let epoch = match &a.input {
+        Input::Wav(_) => None,
+        _ => Some(now()),
+    };
+    if a.json {
+        start_fm(&mut o, bw, &known, epoch)?;
+    }
+    match &a.input {
+        Input::Wav(path) => {
+            let w =
+                xara::wav::read(std::path::Path::new(path)).map_err(|e| io::Error::other(format!("{path}: {e}")))?;
+            say!("{path}: {} Hz, {:.1} s", w.rate, w.samples.len() as f64 / f64::from(w.rate));
+            let mut r = Resampler::new(f64::from(w.rate), fm::FS).map_err(|e| io::Error::other(format!("{path}: {e}")))?;
+            let mut x = r.process(&w.samples);
+            x.extend(r.flush());
+            for c in x.chunks(CAPTURE_BATCH) {
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                for b in c.chunks(audio::BLOCK) {
+                    m.feed(b);
+                }
+                drain_fm(&mut m, &mut o, epoch, a.json)?;
+            }
+        }
+        Input::Stdin(rate) => {
+            let mut r = Resampler::new(*rate, fm::FS).map_err(io::Error::other)?;
+            let mut stdin = io::stdin().lock();
+            let (mut buf, mut carry) = (vec![0u8; 4800], Vec::new());
+            while !stop.load(Ordering::SeqCst) {
+                let n = stdin.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                carry.extend_from_slice(&buf[..n]);
+                let whole = carry.len() & !1;
+                let x: Vec<f64> = carry[..whole].chunks_exact(2).map(xara::wav::s16).collect();
+                carry.drain(..whole);
+                for b in r.process(&x).chunks(audio::BLOCK) {
+                    m.feed(b);
+                }
+                drain_fm(&mut m, &mut o, epoch, a.json)?;
+            }
+        }
+        Input::Capture(src) => {
+            let mut dev = audio::open_capture(a.audio.unwrap_or_default(), src)?;
+            say!("listening on {src}");
+            let mut x = vec![0i16; audio::BLOCK];
+            while !stop.load(Ordering::SeqCst) {
+                dev.read(&mut x)?;
+                let y: Vec<f64> = x.iter().map(|&s| audio::sample(s)).collect();
+                m.feed(&y);
+                drain_fm(&mut m, &mut o, epoch, a.json)?;
+            }
+        }
+    }
+    m.finish();
+    drain_fm(&mut m, &mut o, epoch, a.json)
+}
+
 fn run(a: Args, stop: &Arc<AtomicBool>) -> std::io::Result<()> {
+    if let Some(bw) = a.fm {
+        return run_fm(&a, bw, stop);
+    }
     let m = Monitor::new(a.bw, &a.mon);
     xara::log::line(
         true,
