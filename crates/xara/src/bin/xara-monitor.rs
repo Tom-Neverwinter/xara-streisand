@@ -19,9 +19,9 @@ use xara::signals;
 use xara_phy::hf::level::Bandwidth;
 use xara_phy::hf::rx::FS;
 use xara_ui::bus;
-use xara_ui::messages::Info;
+use xara_ui::messages::{Info, meter};
 use xara_ui::server::{MONITOR, TICK, UiServer};
-use xara_ui::telemetry::EVENT_QUEUE;
+use xara_ui::telemetry::{EVENT_QUEUE, Meter};
 
 const QUEUE: usize = 1200;
 const CAPTURE_BATCH: usize = 4800;
@@ -120,9 +120,6 @@ fn parse() -> Result<Option<Args>, String> {
     }
     if fm.is_some() && hf_given {
         return Err("--hf and --fm cannot both be given".into());
-    }
-    if fm.is_some() && ui.port.is_some() {
-        return Err("--fm: the web UI is HF-only for now; use text output or --json".into());
     }
     let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose };
     Ok(Some(Args { input, audio, bw, fm, mon, json, ui, log }))
@@ -278,8 +275,17 @@ fn pipe(
     Ok(ui)
 }
 
-fn drain_fm(m: &mut FmMonitor, o: &mut impl Write, epoch: Option<f64>, json: bool) -> io::Result<()> {
+fn drain_fm(
+    m: &mut FmMonitor,
+    o: &mut impl Write,
+    epoch: Option<f64>,
+    json: bool,
+    events: Option<&bus::Publisher>,
+) -> io::Result<()> {
     while let Some(l) = m.pop() {
+        if let Some(p) = events {
+            p.event(l.json(epoch.map(|e| e + l.t)));
+        }
         if xara::log::to_file() {
             match epoch {
                 Some(e) => xara::log::line(false, format_args!("{} {}", utc(e + l.t), l.text)),
@@ -308,9 +314,68 @@ fn start_fm(o: &mut impl Write, bw: FmBandwidth, known: &[String], epoch: Option
     o.flush()
 }
 
-// A passive FM monitor: decode synchronously and print lines. The web UI and
-// session-payload following are HF-only for now (issue #2). The audio rate is
-// the same 48 kHz the HF monitor uses, so the input handling mirrors it.
+// Feeds the read-only web UI for the FM monitor: the heard list and stats come
+// from the FmMonitor, the event log from each decoded line, and the waterfall
+// from the audio. HF-decoder-only panels (link, keys, per-frame search counts)
+// stay empty for FM.
+struct FmUi {
+    publisher: bus::Publisher,
+    meter: Meter,
+    sent: u64,
+    source: String,
+    epoch: Option<f64>,
+}
+
+impl FmUi {
+    fn setup(a: &Args, source: String, epoch: Option<f64>) -> io::Result<Option<FmUi>> {
+        let Some(port) = a.ui.port else { return Ok(None) };
+        let (publisher, sub) = bus::channel(EVENT_QUEUE);
+        let info = Info { version: env!("CARGO_PKG_VERSION"), mode: "fm", span_hz: xara::FM_SPAN_HZ };
+        let server = UiServer::bind_readonly(a.ui.addr(), port, sub, info, MONITOR, a.ui.hosts.clone())
+            .map_err(|e| io::Error::other(format!("--ui-port {port}: {e}")))?;
+        say!("UI http://{}/ (read-only)", server.addr);
+        Ok(Some(FmUi { publisher, meter: Meter::default(), sent: 0, source, epoch }))
+    }
+
+    fn audio(&mut self, x: &[f64]) {
+        self.meter.feed(x);
+        self.publisher.audio(x);
+        self.sent += x.len() as u64;
+    }
+
+    fn status(&mut self, m: &FmMonitor, ended: bool) {
+        let ts = self.sent as f64 / fm::FS;
+        let rx = std::mem::take(&mut self.meter);
+        let span = f64::from(xara::FM_SPAN_HZ);
+        let s = xara_ui::json::Obj::typed("status")
+            .num2("ts", ts)
+            .opt2("epoch", self.epoch)
+            .str("source", &self.source)
+            .str("mode", "FM")
+            .int("bw", u64::from(xara::FM_SPAN_HZ))
+            .nums2("passband", &[0.0, span])
+            .obj("rx", meter(&rx))
+            .num2("lag", 0.0)
+            .bool("ended", ended)
+            .int("dropped", self.publisher.dropped() as u64)
+            .raw("decoder", &m.decoder_json())
+            .end();
+        self.publisher.status(s);
+    }
+}
+
+fn fm_source(input: &Input) -> String {
+    match input {
+        Input::Wav(p) => p.clone(),
+        Input::Stdin(_) => "stdin".into(),
+        Input::Capture(s) => format!("capture {s}"),
+    }
+}
+
+// A passive FM monitor: decode synchronously and print lines, and (with
+// --ui-port) feed the read-only web UI. Session-payload following is still the
+// terminal/JSON path (issue #2). The audio rate is the same 48 kHz the HF
+// monitor uses, so the input handling mirrors it.
 fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
     let known: Vec<String> = a.mon.calls.iter().chain(&a.mon.names).cloned().collect();
     let mut m = FmMonitor::new(bw, &fm::Opts { known: known.clone() });
@@ -333,6 +398,7 @@ fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
     if a.json {
         start_fm(&mut o, bw, &known, epoch)?;
     }
+    let mut ui = FmUi::setup(a, fm_source(&a.input), epoch)?;
     match &a.input {
         Input::Wav(path) => {
             let w =
@@ -347,8 +413,14 @@ fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
                 }
                 for b in c.chunks(audio::BLOCK) {
                     m.feed(b);
+                    if let Some(u) = &mut ui {
+                        u.audio(b);
+                    }
                 }
-                drain_fm(&mut m, &mut o, epoch, a.json)?;
+                drain_fm(&mut m, &mut o, epoch, a.json, ui.as_ref().map(|u| &u.publisher))?;
+                if let Some(u) = &mut ui {
+                    u.status(&m, false);
+                }
             }
         }
         Input::Stdin(rate) => {
@@ -366,8 +438,14 @@ fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
                 carry.drain(..whole);
                 for b in r.process(&x).chunks(audio::BLOCK) {
                     m.feed(b);
+                    if let Some(u) = &mut ui {
+                        u.audio(b);
+                    }
                 }
-                drain_fm(&mut m, &mut o, epoch, a.json)?;
+                drain_fm(&mut m, &mut o, epoch, a.json, ui.as_ref().map(|u| &u.publisher))?;
+                if let Some(u) = &mut ui {
+                    u.status(&m, false);
+                }
             }
         }
         Input::Capture(src) => {
@@ -378,12 +456,18 @@ fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
                 dev.read(&mut x)?;
                 let y: Vec<f64> = x.iter().map(|&s| audio::sample(s)).collect();
                 m.feed(&y);
-                drain_fm(&mut m, &mut o, epoch, a.json)?;
+                if let Some(u) = &mut ui {
+                    u.audio(&y);
+                }
+                drain_fm(&mut m, &mut o, epoch, a.json, ui.as_ref().map(|u| &u.publisher))?;
+                if let Some(u) = &mut ui {
+                    u.status(&m, false);
+                }
             }
         }
     }
     m.finish();
-    drain_fm(&mut m, &mut o, epoch, a.json)?;
+    drain_fm(&mut m, &mut o, epoch, a.json, ui.as_ref().map(|u| &u.publisher))?;
     // A summary on stderr (so --json stdout stays clean) that the corpus
     // regression check can parse, mirroring the HF monitor's "frames N/M ok".
     let s = m.stats();
@@ -395,6 +479,15 @@ fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
         s.connects,
         s.cq
     );
+    if let Some(u) = &mut ui {
+        u.status(&m, true);
+    }
+    if ui.is_some() {
+        say!("input ended; the page stays up until interrupted");
+        while !stop.load(Ordering::SeqCst) {
+            thread::sleep(TICK);
+        }
+    }
     Ok(())
 }
 

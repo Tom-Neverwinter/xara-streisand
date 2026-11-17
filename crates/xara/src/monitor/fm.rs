@@ -193,6 +193,48 @@ impl FmMonitor {
         &self.heard
     }
 
+    /// The web UI's `decoder` object for FM, in the same shape the monitor page
+    /// reads for HF: a heard list and a stats block. FM has no blind key search
+    /// or per-level control tally, so `ctrl`/`ctrl_blind`/`searches` are 0 and
+    /// the link/keys panels stay empty; the event log and heard list carry the
+    /// FM session (issue #2).
+    pub fn decoder_json(&self) -> String {
+        use xara_ui::json::Obj;
+        let now = self.heard.values().map(|h| h.last).fold(0.0_f64, f64::max);
+        let mut items: Vec<(&String, &Heard)> = self.heard.iter().collect();
+        items.sort_by(|a, b| b.1.last.total_cmp(&a.1.last));
+        let heard: Vec<String> = items
+            .iter()
+            .map(|(name, h)| {
+                let kinds: Vec<String> = h.roles.iter().map(|r| (*r).to_string()).collect();
+                Obj::new()
+                    .str("name", name)
+                    .strs("kinds", &kinds)
+                    .num2("first", h.last)
+                    .num2("last", h.last)
+                    .int("count", h.count as u64)
+                    .end()
+            })
+            .collect();
+        let s = &self.stats;
+        let stats = Obj::new()
+            .int("frames_ok", s.frames_ok as u64)
+            .int("frames", s.frames as u64)
+            .int("ctrl", 0)
+            .int("ctrl_blind", 0)
+            .int("searches", 0)
+            .int("transmissions", s.transmissions as u64)
+            .int("connects", s.connects as u64)
+            .int("cq", s.cq as u64);
+        Obj::new()
+            .num2("decoded", now)
+            .raw("link", "null")
+            .raw("keys", "[]")
+            .raw("heard", &format!("[{}]", heard.join(",")))
+            .obj("stats", stats)
+            .end()
+    }
+
     fn on(&mut self, ev: Event) {
         match ev {
             Event::Tx(t) => self.on_tx(t),
