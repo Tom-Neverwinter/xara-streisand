@@ -54,6 +54,7 @@ struct Args {
     drive_db: f64,
     tx_shift: f64,
     rx_shift: f64,
+    doppler: Option<xara::doppler::Schedule>,
     quiet: bool,
     ui: UiArgs,
     ui_control: bool,
@@ -93,6 +94,7 @@ fn defaults() -> Args {
         drive_db: DEFAULT_DRIVE_DB,
         tx_shift: 0.0,
         rx_shift: 0.0,
+        doppler: None,
         quiet: false,
         ui: UiArgs::default(),
         ui_control: false,
@@ -150,6 +152,11 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--drive-db" => a.drive_db = finite(k, &v()?)?,
         "--tx-shift" => a.tx_shift = finite(k, &v()?)?,
         "--rx-shift" => a.rx_shift = finite(k, &v()?)?,
+        "--doppler" => {
+            let f = v()?;
+            let text = std::fs::read_to_string(&f).map_err(|e| format!("--doppler {f}: {e}"))?;
+            a.doppler = Some(xara::doppler::Schedule::parse(&text).map_err(|e| format!("--doppler {f}: {e}"))?);
+        }
         "--quiet" => a.quiet = true,
         "--ui-control" => a.ui_control = true,
         "--ui-token" => {
@@ -577,11 +584,19 @@ fn serve<M: Modem>(
         None => None,
     };
     let rate = f64::from(xara::audio::RATE);
-    let (mut rx_shift, mut tx_shift) = (Shift::new(a.rx_shift, rate), Shift::new(a.tx_shift, rate));
+    let (mut rx_shift, mut tx_shift) = match &a.doppler {
+        Some(_) => (Some(Shift::tracking(a.rx_shift, rate)), Some(Shift::tracking(a.tx_shift, rate))),
+        None => (Shift::new(a.rx_shift, rate), Shift::new(a.tx_shift, rate)),
+    };
     let mut shifted = Vec::new();
     let pumped = pump(a, io.as_mut(), tx, stop, rec, |x, out, s| {
         if let Some(b) = s.budget {
             tnc.set_tx_latency(b.total(), b.lag());
+        }
+        if let (Some(d), Some(r), Some(t)) = (&a.doppler, &mut rx_shift, &mut tx_shift) {
+            let (dr, dt) = d.now();
+            r.set_hz(a.rx_shift + dr, rate);
+            t.set_hz(a.tx_shift + dt, rate);
         }
         match &mut rx_shift {
             Some(r) => {

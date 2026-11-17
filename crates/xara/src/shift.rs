@@ -18,9 +18,11 @@ pub struct Shift {
 impl Shift {
     /// `None` when `hz` is 0, so an unshifted path costs nothing and adds no delay.
     pub fn new(hz: f64, fs: f64) -> Option<Self> {
-        if hz == 0.0 {
-            return None;
-        }
+        (hz != 0.0).then(|| Self::tracking(hz, fs))
+    }
+
+    /// A shift that is kept even at 0 Hz, for one retuned while running (`set_hz`, Doppler tracking).
+    pub fn tracking(hz: f64, fs: f64) -> Self {
         // odd taps only; Blackman window keeps the image of a 300-3000 Hz signal below about -50 dB
         let h = (0..TAPS)
             .filter(|k| (k + MID) % 2 == 1)
@@ -31,7 +33,12 @@ impl Shift {
                 (k, 2.0 / (PI * m) * w)
             })
             .collect();
-        Some(Self { step: 2.0 * PI * hz / fs, phase: 0.0, h, ring: vec![0.0; TAPS], pos: 0 })
+        Self { step: 2.0 * PI * hz / fs, phase: 0.0, h, ring: vec![0.0; TAPS], pos: 0 }
+    }
+
+    /// Retune; the mixer's phase carries on, so the output has no step.
+    pub fn set_hz(&mut self, hz: f64, fs: f64) {
+        self.step = 2.0 * PI * hz.clamp(-MAX_HZ, MAX_HZ) / fs;
     }
 
     pub fn process(&mut self, x: &mut [f64]) {
