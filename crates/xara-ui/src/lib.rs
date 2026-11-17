@@ -1,3 +1,4 @@
+//! Telemetry feed and web UI server (HTTP, WebSocket, NDJSON) for the xara modem.
 pub mod bus;
 pub mod json;
 pub mod messages;

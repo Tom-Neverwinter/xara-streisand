@@ -18,9 +18,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use xara_arq::fm::broadcast::{self, Received};
 use xara_arq::textcomp;
 use xara_phy::call::call_hash;
-use xara_phy::fm::ctrl::{Codebook, Side};
 use xara_phy::fm::ctrl::code::{BREAK, GO_AHEAD, QRT};
-use xara_phy::fm::frame::{parse_data, Kind, Record0};
+use xara_phy::fm::ctrl::{Codebook, Side};
+use xara_phy::fm::frame::{Kind, Record0, parse_data};
 use xara_phy::fm::level::{FmBandwidth, Record};
 use xara_phy::fm::rx::receiver::{Event, Receiver, Transmission};
 
@@ -330,14 +330,7 @@ impl FmMonitor {
         let cb = Codebook::for_link(c.as_bytes(), a.as_bytes());
         let codes: Vec<u32> = (1..=24).collect();
         self.rx.set_ctrl(Side::Source, Some(cb), &codes);
-        self.follow = Some(Follow {
-            caller: c,
-            answerer: a,
-            vias,
-            talker: 0,
-            comp,
-            last: [Vec::new(), Vec::new()],
-        });
+        self.follow = Some(Follow { caller: c, answerer: a, vias, talker: 0, comp, last: [Vec::new(), Vec::new()] });
     }
 
     fn on_data(&mut self, at: f64, t: &Transmission) {
@@ -415,16 +408,14 @@ fn decode_payload(comp: u8, compressed: bool, frame_ix: usize, data: &[u8]) -> S
 /// whitespace, replace the rest with a dot (as the HF monitor's payload pane
 /// does).
 fn as_text(b: &[u8]) -> String {
-    b.iter()
-        .map(|&c| if c == b'\n' || c == b'\t' || (0x20..=0x7e).contains(&c) { c as char } else { '·' })
-        .collect()
+    b.iter().map(|&c| if c == b'\n' || c == b'\t' || (0x20..=0x7e).contains(&c) { c as char } else { '·' }).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xara_phy::fm::ctrl::{frame_audio, Codebook as TxCodebook};
-    use xara_phy::fm::frame::{build_data, Trailer};
+    use xara_phy::fm::ctrl::{Codebook as TxCodebook, frame_audio};
+    use xara_phy::fm::frame::{Trailer, build_data};
     use xara_phy::fm::tx::{Modulator, TxOptions};
 
     // A tiny deterministic PRNG for the modulator's lead-in randomisation; the
@@ -551,7 +542,8 @@ mod tests {
         x.extend(m.transmission(Record::Connect, 0, &[&r0[..]], 21, opt, &mut rand));
         x.extend(std::iter::repeat_n(0.0, 24000));
         // The caller's first frame, text-compressed.
-        let d0 = build_data(rec, flen, &enc.bytes, true, 3, false, Trailer { lead_report: 1, level: 0, chain_snr: None });
+        let d0 =
+            build_data(rec, flen, &enc.bytes, true, 3, false, Trailer { lead_report: 1, level: 0, chain_snr: None });
         x.extend(m.transmission(rec, key, &[&d0[..]], 2, opt, &mut rand));
         x.extend(std::iter::repeat_n(0.0, 24000));
 

@@ -7,7 +7,7 @@ publish.workspace = true
 license.workspace = true
 readme = "README.md"
 repository.workspace = true
-description = "A VARA-compatible HF/FM modem and passive monitor for Linux, FreeBSD and macOS."
+description = "A VARA-compatible HF/FM modem and passive monitor for Linux, FreeBSD, macOS and Windows."
 
 [dependencies]
 xara-phy.workspace = true

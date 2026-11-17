@@ -11,11 +11,11 @@ use xara::cli::{self, UiArgs, Usage, num};
 use xara::monitor::fm::{self, FmMonitor};
 use xara::monitor::ui::{Heard, Shared};
 use xara::monitor::{Monitor, MonitorOpts};
-use xara_phy::fm::level::FmBandwidth;
 use xara::resample::{Resampler, check_rate};
 use xara::say;
 #[cfg(unix)]
 use xara::signals;
+use xara_phy::fm::level::FmBandwidth;
 use xara_phy::hf::level::Bandwidth;
 use xara_phy::hf::rx::FS;
 use xara_ui::bus;
@@ -404,7 +404,8 @@ fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
             let w =
                 xara::wav::read(std::path::Path::new(path)).map_err(|e| io::Error::other(format!("{path}: {e}")))?;
             say!("{path}: {} Hz, {:.1} s", w.rate, w.samples.len() as f64 / f64::from(w.rate));
-            let mut r = Resampler::new(f64::from(w.rate), fm::FS).map_err(|e| io::Error::other(format!("{path}: {e}")))?;
+            let mut r =
+                Resampler::new(f64::from(w.rate), fm::FS).map_err(|e| io::Error::other(format!("{path}: {e}")))?;
             let mut x = r.process(&w.samples);
             x.extend(r.flush());
             for c in x.chunks(CAPTURE_BATCH) {

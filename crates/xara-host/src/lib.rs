@@ -1,3 +1,4 @@
+//! VARA-compatible command, data and KISS TCP host ports for the xara modem.
 // Linux pauses a listener with shutdown(); other platforms (macOS, BSD, Windows) use the bouncer.
 #[cfg(any(windows, all(unix, any(not(target_os = "linux"), test))))]
 mod bouncer;

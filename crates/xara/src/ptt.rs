@@ -69,7 +69,9 @@ impl PttSpec {
             "vox" if rest.is_empty() => Ok(Self::Vox),
             "rts" => path("rts").map(Self::Rts),
             "dtr" => path("dtr").map(Self::Dtr),
-            "cm108" if cfg!(windows) => Err("--ptt cm108: not supported on Windows yet; use rts/dtr, rigctld or vox".into()),
+            "cm108" if cfg!(windows) => {
+                Err("--ptt cm108: not supported on Windows yet; use rts/dtr, rigctld or vox".into())
+            }
             "cm108" if cfg!(target_os = "macos") && rest.starts_with('/') => {
                 Err("--ptt cm108: macOS has no hidraw; use cm108:VID:PID[:GPIO] (4-digit hex USB ids)".into())
             }
@@ -117,7 +119,9 @@ impl PttSpec {
             #[cfg(unix)]
             Self::Cm108Usb { vendor, product, gpio } => cm108_usb(*vendor, *product, *gpio)?,
             #[cfg(windows)]
-            Self::Cm108 { .. } | Self::Cm108Usb { .. } => return Err(io::Error::other("--ptt cm108 is not supported on Windows")),
+            Self::Cm108 { .. } | Self::Cm108Usb { .. } => {
+                return Err(io::Error::other("--ptt cm108 is not supported on Windows"));
+            }
             Self::Rigctld(a) => Box::new(Rigctld::open(a)?),
             Self::Trusdx => return Err(io::Error::other("--ptt trusdx comes with --audio trusdx")),
         })
@@ -325,8 +329,16 @@ mod win {
 
     impl Serial {
         pub fn open(path: &str, line: i32) -> io::Result<Self> {
-            let dev = if path.starts_with(super::DEVICE_NS) { path.to_string() } else { format!("{}{path}", super::DEVICE_NS) };
-            let f = OpenOptions::new().read(true).write(true).open(&dev).map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
+            let dev = if path.starts_with(super::DEVICE_NS) {
+                path.to_string()
+            } else {
+                format!("{}{path}", super::DEVICE_NS)
+            };
+            let f = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&dev)
+                .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
             let s = Self { f, path: path.into(), line };
             s.escape(CLRRTS)?;
             s.escape(CLRDTR)?;

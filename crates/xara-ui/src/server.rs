@@ -256,7 +256,12 @@ fn fill_random(buf: &mut [u8]) -> io::Result<()> {
     // handle needed). The modern successor to /dev/urandom and RtlGenRandom.
     #[link(name = "bcrypt")]
     unsafe extern "system" {
-        fn BCryptGenRandom(h_algorithm: *mut core::ffi::c_void, pb_buffer: *mut u8, cb_buffer: u32, dw_flags: u32) -> i32;
+        fn BCryptGenRandom(
+            h_algorithm: *mut core::ffi::c_void,
+            pb_buffer: *mut u8,
+            cb_buffer: u32,
+            dw_flags: u32,
+        ) -> i32;
     }
     const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
     if buf.is_empty() {
@@ -264,13 +269,10 @@ fn fill_random(buf: &mut [u8]) -> io::Result<()> {
     }
     // SAFETY: buf is valid for cb_buffer bytes; a null algorithm handle is allowed
     // with BCRYPT_USE_SYSTEM_PREFERRED_RNG.
-    let status =
-        unsafe { BCryptGenRandom(core::ptr::null_mut(), buf.as_mut_ptr(), buf.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
-    if status == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::other(format!("BCryptGenRandom failed: {status:#010x}")))
-    }
+    let status = unsafe {
+        BCryptGenRandom(core::ptr::null_mut(), buf.as_mut_ptr(), buf.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
+    };
+    if status == 0 { Ok(()) } else { Err(io::Error::other(format!("BCryptGenRandom failed: {status:#010x}"))) }
 }
 
 pub fn new_token() -> io::Result<String> {

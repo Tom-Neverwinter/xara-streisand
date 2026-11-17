@@ -1,3 +1,6 @@
+//! Signal processing for a VARA-compatible HF/FM modem: coding, modulation, receivers and the turbo decoder.
+//!
+//! `hf` and `fm` hold the per-mode waveforms; `fec`/`turbo` the coding; `decode`/`receiver` turn audio into frames.
 pub mod busy;
 pub mod call;
 pub mod constellation;

@@ -1,5 +1,5 @@
 //! Windows audio through WinMM (waveIn/waveOut), the API VARA itself uses: 48 kHz mono 16-bit, event callbacks.
-//! Devices are named as Windows lists them (Sound settings / `xara --list-audio`); WinMM truncates names to 31
+//! Devices are named as Windows lists them (Sound settings / `xara --list-devices`); WinMM truncates names to 31
 //! characters, so a longer name matches its first 31.  Without --radio, playback is refused unless the device
 //! looks like a virtual cable, as the Unix backends refuse anything but a null sink.
 use std::collections::VecDeque;
@@ -83,7 +83,8 @@ mod ffi {
         pub fn waveInClose(h: isize) -> u32;
         pub fn waveOutGetNumDevs() -> u32;
         pub fn waveOutGetDevCapsW(id: usize, caps: *mut WAVEOUTCAPSW, size: u32) -> u32;
-        pub fn waveOutOpen(h: *mut isize, id: u32, fmt: *const WAVEFORMATEX, cb: usize, inst: usize, flags: u32) -> u32;
+        pub fn waveOutOpen(h: *mut isize, id: u32, fmt: *const WAVEFORMATEX, cb: usize, inst: usize, flags: u32)
+        -> u32;
         pub fn waveOutPrepareHeader(h: isize, hdr: *mut WAVEHDR, size: u32) -> u32;
         pub fn waveOutUnprepareHeader(h: isize, hdr: *mut WAVEHDR, size: u32) -> u32;
         pub fn waveOutWrite(h: isize, hdr: *mut WAVEHDR, size: u32) -> u32;
@@ -160,9 +161,10 @@ fn find(names: &[String], want: &str, what: &str) -> io::Result<u32> {
         return Ok(WAVE_MAPPER);
     }
     let lw = want.to_lowercase();
-    let hit = names.iter().position(|n| n == want).or_else(|| {
-        names.iter().position(|n| n.chars().count() == 31 && want.starts_with(n.as_str()))
-    });
+    let hit = names
+        .iter()
+        .position(|n| n == want)
+        .or_else(|| names.iter().position(|n| n.chars().count() == 31 && want.starts_with(n.as_str())));
     let hit = hit.or_else(|| {
         let m: Vec<_> = names.iter().enumerate().filter(|(_, n)| n.to_lowercase().contains(&lw)).collect();
         (m.len() == 1).then(|| m[0].0)
@@ -240,7 +242,9 @@ impl Capture {
         let id = find(&inputs(), want, "capture")?;
         let ev = Event::new()?;
         let mut h = 0;
-        mm(&format!("opening capture {want:?}"), unsafe { waveInOpen(&mut h, id, &format(), ev.0 as usize, 0, CALLBACK_EVENT) })?;
+        mm(&format!("opening capture {want:?}"), unsafe {
+            waveInOpen(&mut h, id, &format(), ev.0 as usize, 0, CALLBACK_EVENT)
+        })?;
         let mut c = Self { h, ev, bufs: VecDeque::new() };
         for _ in 0..CAPTURE_BUFFERS {
             let mut b = Buf::new(vec![0; BLOCK]);
@@ -301,8 +305,19 @@ impl Play {
         let id = check_playback(&names, want, radio)?;
         let ev = Event::new()?;
         let mut h = 0;
-        mm(&format!("opening playback {want:?}"), unsafe { waveOutOpen(&mut h, id, &format(), ev.0 as usize, 0, CALLBACK_EVENT) })?;
-        Ok(Self { h, ev, name: want.into(), cap: tx.capacity(), sent: VecDeque::new(), written: 0, report: Report::default(), underruns: 0 })
+        mm(&format!("opening playback {want:?}"), unsafe {
+            waveOutOpen(&mut h, id, &format(), ev.0 as usize, 0, CALLBACK_EVENT)
+        })?;
+        Ok(Self {
+            h,
+            ev,
+            name: want.into(),
+            cap: tx.capacity(),
+            sent: VecDeque::new(),
+            written: 0,
+            report: Report::default(),
+            underruns: 0,
+        })
     }
 
     fn reap(&mut self) {
@@ -411,10 +426,14 @@ mod tests {
 
     #[test]
     fn device_names_and_the_radio_guard() {
-        let names: Vec<String> =
-            ["Speakers (Realtek(R) Audio)", "Line (Voicemod Virtual Audio De", "CABLE Input (VB-Audio Virtual C", "USB Audio CODEC"]
-                .map(String::from)
-                .into();
+        let names: Vec<String> = [
+            "Speakers (Realtek(R) Audio)",
+            "Line (Voicemod Virtual Audio De",
+            "CABLE Input (VB-Audio Virtual C",
+            "USB Audio CODEC",
+        ]
+        .map(String::from)
+        .into();
         assert_eq!(find(&names, "USB Audio CODEC", "x").unwrap(), 3);
         assert_eq!(find(&names, "CABLE Input (VB-Audio Virtual Cable)", "x").unwrap(), 2); // WinMM's 31-char cut
         assert_eq!(find(&names, "voicemod", "x").unwrap(), 1);
