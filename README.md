@@ -21,7 +21,7 @@ The aim is full compatibility with the entire VARA family, in one program that a
 | VARA Chat / VARA Terminal | xara speaks their TCP interface. End-to-end tests against the real apps are still pending |
 | Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` |
 
-Open gaps are tracked in the issues. Pick one up, see [CONTRIBUTING.md](CONTRIBUTING.md).
+The full feature-by-feature chart, with the test behind each line and the open gaps in priority order, is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Pick a gap up, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Who transmits
 
