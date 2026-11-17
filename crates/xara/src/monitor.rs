@@ -1,3 +1,4 @@
+pub mod fm;
 pub mod record;
 pub mod ui;
 

@@ -7,6 +7,7 @@ const COLORS = Object.fromEntries(["caller", "answerer", "ok", "bad", "unproto"]
 const GROUP = {
   ctrl: "ctrl", data: "data", payload: "payload", header: "payload", unproto: "unproto", kiss: "unproto",
   cq: "unproto", learned: "notes", dropped: "notes", link_end: "notes", blind: "notes", summary: "notes",
+  connect: "notes", broadcast: "notes", note: "notes",
 };
 
 const log = new LogView($("log"), 3000, 800);
@@ -86,7 +87,7 @@ function record(r) {
   } else if (r.t === "unproto") {
     e.key = `u|${r.code}`;
     if (unproto) wf.mark(r.ts, unproto[0], unproto[1], COLORS.unproto);
-  } else if (r.t === "data") {
+  } else if (r.t === "data" && r.frames !== undefined) {
     const ok = r.frames.includes("+");
     if (!ok) e.cls += " bad";
     if (passband) wf.mark(r.ts, passband[0] + r.afc, passband[1] + r.afc, ok ? COLORS.ok : COLORS.bad);
@@ -101,7 +102,7 @@ function status(s) {
   conn.alive();
   wf.clock = s.ts;
   log.setOffset(s.epoch ?? Date.now() / 1000 - s.ts);
-  $("mode").textContent = `HF ${s.bw} Hz`;
+  $("mode").textContent = `${s.mode ?? "HF"} ${s.bw} Hz`;
   $("calls").textContent = s.source + (s.epoch ? ` since ${new Date(s.epoch * 1000).toLocaleTimeString([], { hour12: false })}` : "");
   passband = s.passband;
   unproto = s.unproto;

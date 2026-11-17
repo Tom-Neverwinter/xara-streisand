@@ -149,6 +149,7 @@ options:
     --capture SOURCE        audio source
 
     --hf 500|2300|2750      HF bandwidth (default 2300)
+    --fm narrow|wide        monitor VARA FM: connects, CQ, and session text (text/JSON, no web UI yet)
 
     --call CALL             known call (repeatable)
     --calls FILE            list of known calls, one per line

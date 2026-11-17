@@ -1,4 +1,5 @@
-// Exercises the TNC, PTT or web UI, which are Unix-only (see the crate root).
+// Exercises the TNC and PTT, which are Unix-only (see the crate root). The web
+// UI is cross-platform now, but its monitor arg-parse cases ride along here.
 #![cfg(unix)]
 
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -672,6 +673,15 @@ fn bad_option_values_are_refused() {
         let (c, _, e) = monitor(&["--stdin", rate]);
         assert_eq!(c, 2, "{rate}: {e}");
         assert!(e.contains("--stdin: sample rate"), "{rate}: {e}");
+    }
+    for (extra, want) in [
+        (&["--fm", "sideways"][..], "--fm: expected narrow or wide"),
+        (&["--fm", "narrow", "--hf", "2300"], "--hf and --fm cannot both be given"),
+        (&["--hf", "500", "--fm", "wide"], "--hf and --fm cannot both be given"),
+    ] {
+        let (c, _, e) = monitor(&[&["--stdin", "48000"][..], extra].concat());
+        assert_eq!(c, 2, "{extra:?}: {e}");
+        assert!(e.contains(want), "{extra:?}: {e}");
     }
 }
 
