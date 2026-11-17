@@ -138,6 +138,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --audio BACKEND         pulse, alsa, coreaudio, winmm or trusdx; default pulse on linux/bsd,
                             coreaudio on macOS, winmm on Windows
     --list-devices          list capture and playback devices for --audio
+    --setup                 ask for call, mode, devices and PTT, then write the default config file
     --capture SOURCE        audio source
     --playback SINK         audio sink
     --tx-buffer-ms N        TX audio queue, raise on underruns (30-500, default 40)

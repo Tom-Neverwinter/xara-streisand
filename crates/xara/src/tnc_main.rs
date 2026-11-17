@@ -66,6 +66,7 @@ struct Args {
     log: Option<PathBuf>,
     hf_given: bool,
     list_devices: bool,
+    setup: bool,
 }
 
 fn finite(k: &str, v: &str) -> Result<f64, String> {
@@ -103,6 +104,7 @@ fn defaults() -> Args {
         log: None,
         hf_given: false,
         list_devices: false,
+        setup: false,
     }
 }
 
@@ -163,6 +165,7 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--record" => a.record = Some(PathBuf::from(v()?)),
         "--log" => a.log = Some(PathBuf::from(v()?)),
         "--list-devices" => a.list_devices = true,
+        "--setup" => a.setup = true,
         #[cfg(feature = "registered")]
         "--registered" => a.registered = true,
         #[cfg(not(feature = "registered"))]
@@ -195,7 +198,7 @@ fn build(argv: &[String], saved: &Pairs) -> Result<Args, String> {
         }
         take(&mut a, &format!("--{k}"), || Ok(v.clone()))?;
     }
-    if !a.list_devices {
+    if !a.list_devices && !a.setup {
         check(&a)?;
     }
     Ok(a)
@@ -438,6 +441,128 @@ fn list_devices(b: Backend) -> Result<ExitCode, String> {
     }
     print!("{out}");
     Ok(ExitCode::SUCCESS)
+}
+
+/// `xara --setup`: ask for the few things xara needs and write them to the config file xara reads at
+/// startup (`~/.config/xara/xara.conf`, `%APPDATA%\xara\xara.conf` on Windows).
+fn setup(b: Backend) -> Result<ExitCode, String> {
+    let path = config_home().ok_or("no config directory (set HOME, or XDG_CONFIG_HOME)")?;
+    let d = devices(b).map_err(|e| format!("listing {} devices: {e}", b.name()))?;
+    let stdin = std::io::stdin();
+    let mut out = std::io::stdout();
+    let text = setup_with(&mut stdin.lock(), &mut out, &d, &path)?;
+    if path.exists() && !ask_yes(&mut stdin.lock(), &mut out, &format!("{} exists. replace it?", path.display()))? {
+        println!("nothing written. the settings were:\n\n{text}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, &text).map_err(|e| format!("{}: {e}", path.display()))?;
+    println!("wrote {}. start xara with no options to use it; edit the file for anything else.", path.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Where `--setup` writes and, if it exists, where xara reads its config by default.
+fn config_home() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .map(|b| b.join("xara").join("xara.conf"))
+        .or_else(|| {
+            if !cfg!(windows) {
+                return None;
+            }
+            std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("xara").join("xara.conf"))
+        })
+}
+
+fn prompt(input: &mut impl std::io::BufRead, out: &mut impl std::io::Write, q: &str) -> Result<String, String> {
+    write!(out, "{q} ").and_then(|_| out.flush()).map_err(|e| e.to_string())?;
+    let mut l = String::new();
+    if input.read_line(&mut l).map_err(|e| e.to_string())? == 0 {
+        return Err("setup cancelled (end of input)".into());
+    }
+    Ok(l.trim().to_string())
+}
+
+fn ask_yes(input: &mut impl std::io::BufRead, out: &mut impl std::io::Write, q: &str) -> Result<bool, String> {
+    Ok(matches!(prompt(input, out, &format!("{q} [y/N]"))?.to_lowercase().as_str(), "y" | "yes"))
+}
+
+/// Pick one of `list` by its number.
+fn pick(
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+    what: &str,
+    list: &[Device],
+) -> Result<String, String> {
+    if list.is_empty() {
+        return Err(format!("no {what} devices found"));
+    }
+    loop {
+        writeln!(out, "\n{what} devices:").map_err(|e| e.to_string())?;
+        for (i, Device { name, desc }) in list.iter().enumerate() {
+            let desc = if desc.is_empty() || desc == name { String::new() } else { format!("  ({desc})") };
+            writeln!(out, "  {}. {name}{desc}", i + 1).map_err(|e| e.to_string())?;
+        }
+        let a = prompt(input, out, &format!("{what} device number:"))?;
+        match a.parse::<usize>() {
+            Ok(n) if (1..=list.len()).contains(&n) => return Ok(list[n - 1].name.clone()),
+            _ => writeln!(out, "pick 1 to {}", list.len()).map_err(|e| e.to_string())?,
+        }
+    }
+}
+
+fn setup_with(
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+    d: &Devices,
+    path: &Path,
+) -> Result<String, String> {
+    writeln!(out, "xara setup: writes {}\n", path.display()).map_err(|e| e.to_string())?;
+    let call = loop {
+        match cli::call(&prompt(input, out, "your callsign:")?.to_uppercase()) {
+            Ok(c) => break c,
+            Err(e) => writeln!(out, "{e}").map_err(|e| e.to_string())?,
+        }
+    };
+    let mode = loop {
+        let a = prompt(input, out, "mode: hf 500 / hf 2300 / hf 2750 / fm narrow / fm wide [hf 2300]:")?;
+        match a.to_lowercase().as_str() {
+            "" | "hf 2300" | "2300" => break "hf = 2300",
+            "hf 500" | "500" => break "hf = 500",
+            "hf 2750" | "2750" => break "hf = 2750",
+            "fm narrow" | "narrow" => break "fm = narrow",
+            "fm wide" | "wide" => break "fm = wide",
+            _ => writeln!(out, "one of: hf 500, hf 2300, hf 2750, fm narrow, fm wide").map_err(|e| e.to_string())?,
+        }
+    };
+    let capture = pick(input, out, "capture (from the radio)", &d.capture)?;
+    let playback = pick(input, out, "playback (to the radio)", &d.playback)?;
+    let mut text = format!(
+        "# written by xara --setup; keys are xara options without the leading --\n\
+         call = {call}\n{mode}\naudio = {}\ncapture = {capture}\nplayback = {playback}\n",
+        d.backend
+    );
+    writeln!(out, "\nPTT: vox, rts:PORT, dtr:PORT, cm108:VID:PID, rigctld, cat:KIND:PORT (see xara --help)")
+        .map_err(|e| e.to_string())?;
+    let ptt = loop {
+        let a = prompt(input, out, "PTT method, or empty for none (receive / virtual cable only):")?;
+        match a.is_empty() || PttSpec::parse(&a).is_ok() {
+            true => break a,
+            false => writeln!(out, "{}", PttSpec::parse(&a).unwrap_err()).map_err(|e| e.to_string())?,
+        }
+    };
+    if !ptt.is_empty() {
+        if ask_yes(input, out, "this keys a real transmitter: enable radio mode?")? {
+            text += &format!("radio\nptt = {ptt}\n");
+        } else {
+            text += &format!("# radio\n# ptt = {ptt}\n");
+        }
+    }
+    Ok(text)
 }
 
 fn persist_drive(dir: &std::path::Path, db: f64) {
@@ -741,6 +866,9 @@ fn real_main() -> Result<ExitCode, String> {
     if base.list_devices {
         return list_devices(base.audio);
     }
+    if base.setup {
+        return setup(base.audio);
+    }
     xara::log::init("xara", base.quiet);
     if let Some(p) = &base.log {
         xara::log::open(p).map_err(|e| format!("--log {}: {e}", p.display()))?;
@@ -924,6 +1052,22 @@ mod tests {
         assert_eq!((a.call.as_str(), a.radio, a.quiet, a.ui.port), ("N2CALL", true, false, Some(8080)));
         assert_eq!(a.ui.hosts, ["a.lan", "b.lan"]);
         std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn setup_asks_and_writes_a_config() {
+        let dev = |n: &str| Device { name: n.into(), desc: String::new() };
+        let d = Devices { backend: "winmm", capture: vec![dev("Mic"), dev("Line In")], playback: vec![dev("Speakers")] };
+        let answers = "bad call!\nn0xra\nfm wide\n9\n2\n1\nrts:COM3\ny\n";
+        let text = setup_with(&mut answers.as_bytes(), &mut Vec::new(), &d, Path::new("x.conf")).unwrap();
+        assert_eq!(
+            text,
+            "# written by xara --setup; keys are xara options without the leading --\ncall = N0XRA\nfm = wide\n\
+             audio = winmm\ncapture = Line In\nplayback = Speakers\nradio\nptt = rts:COM3\n"
+        );
+        let text = setup_with(&mut "N0XRA\n\n1\n1\n\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).unwrap();
+        assert!(text.contains("hf = 2300\n") && !text.contains("radio"));
+        assert!(setup_with(&mut "N0XRA\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).is_err());
     }
 
     #[test]
