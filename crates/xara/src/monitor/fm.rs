@@ -16,6 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use xara_arq::fm::broadcast::{self, Received};
+use xara_arq::textcomp;
 use xara_phy::call::call_hash;
 use xara_phy::fm::ctrl::{Codebook, Side};
 use xara_phy::fm::ctrl::code::{BREAK, GO_AHEAD, QRT};
@@ -63,6 +64,8 @@ struct Follow {
     vias: bool,
     /// 0 = caller is talking, 1 = answerer.
     talker: usize,
+    /// The link's compression, from the connect: 1 = text, 2 = files, else off.
+    comp: u8,
     /// Last payload chunk appended per side, to drop ARQ retransmissions.
     last: [Vec<u8>; 2],
 }
@@ -215,8 +218,13 @@ impl FmMonitor {
         }
     }
 
-    // Turn handover: GO_AHEAD yields the turn to the other party, BREAK seizes
-    // it; either way the talker flips. QRT ends the session.
+    // Turn handover. This mirrors the protocol's own turn semantics, so it is
+    // not just a guess: the ACK codes (ACK_STAY, ACK_UP*, ACK_REQ*, ...) keep
+    // the turn with the current talker, GO_AHEAD hands it to the other party,
+    // and BREAK is the listener seizing it; either of the latter two flips the
+    // talker. QRT ends the session. The one thing that can desync attribution
+    // is a GO_AHEAD/BREAK lost to noise (data frames carry no sender id, so a
+    // missed handover cannot be recovered passively); a fresh connect resyncs.
     fn on_ctrl(&mut self, at: f64, code: u32) {
         let Some(f) = &mut self.follow else { return };
         match code {
@@ -263,7 +271,7 @@ impl FmMonitor {
         // Only an actual connect sets up a session to follow (not a ping etc.),
         // and only when both calls are known.
         if r.kind == Kind::Connect && !r.source.is_empty() && !r.target.is_empty() {
-            self.start_follow(&r.source, &r.target, r.vias() > 0);
+            self.start_follow(&r.source, &r.target, r.vias() > 0, r.compression);
         }
     }
 
@@ -271,7 +279,7 @@ impl FmMonitor {
     // codebook, so its data frames and turn handovers decode. The keyless
     // Connect/Broadcast records still decode too, so a later connect simply
     // re-points the follower.
-    fn start_follow(&mut self, caller: &str, answerer: &str, vias: bool) {
+    fn start_follow(&mut self, caller: &str, answerer: &str, vias: bool, comp: u8) {
         let (c, a) = (caller.to_ascii_uppercase(), answerer.to_ascii_uppercase());
         // Both parties key data with the answerer's call hash.
         self.rx.set_key(call_hash(a.as_bytes()));
@@ -285,6 +293,7 @@ impl FmMonitor {
             answerer: a,
             vias,
             talker: 0,
+            comp,
             last: [Vec::new(), Vec::new()],
         });
     }
@@ -293,17 +302,16 @@ impl FmMonitor {
         // Borrow the two fields disjointly: the follow state and the output
         // queue (going through self.emit would reborrow all of self).
         let (Some(f), out) = (self.follow.as_mut(), &mut self.out) else { return };
-        for frame in t.frames.iter().filter(|fr| fr.ok) {
+        for (i, frame) in t.frames.iter().enumerate() {
+            if !frame.ok {
+                continue;
+            }
             let Some(df) = parse_data(t.record, &frame.bytes, f.vias) else { continue };
             if df.data.is_empty() || df.data == f.last[f.talker] {
                 continue; // empty fill, or an ARQ retransmission of the last chunk
             }
             f.last[f.talker] = df.data.clone();
-            let body = if df.control.compressed {
-                format!("<{} compressed bytes>", df.data.len())
-            } else {
-                as_text(&df.data)
-            };
+            let body = decode_payload(f.comp, df.control.compressed, i, &df.data);
             out.push_back(Line { t: at, kind: Kinds::Data, text: format!("{}> {}", disp(f.call(f.talker)), body) });
         }
     }
@@ -341,6 +349,24 @@ impl FmMonitor {
 
 fn disp(call: &str) -> &str {
     if call.is_empty() { "?" } else { call }
+}
+
+/// Turn a data frame's payload into display text, mirroring the receiver's
+/// `inflate`: a text-compressed first frame is decompressed; a files link is
+/// shown as a byte count (binary transfer, not readable); everything else is
+/// shown raw. `comp` is the link's compression (1 = text, 2 = files, else off),
+/// `frame_ix` the frame's position in the transmission (frame 1 is never
+/// decompressed, matching the protocol).
+fn decode_payload(comp: u8, compressed: bool, frame_ix: usize, data: &[u8]) -> String {
+    const TEXT: u8 = 1;
+    const FILES: u8 = 2;
+    if comp == FILES {
+        format!("<{} file bytes>", data.len())
+    } else if comp == TEXT && compressed && frame_ix != 1 {
+        textcomp::decompress(data).map_or_else(|| as_text(data), |(d, _)| as_text(&d))
+    } else {
+        as_text(data)
+    }
 }
 
 /// Render payload bytes for display: keep printable ASCII and common
@@ -459,6 +485,42 @@ mod tests {
             "answerer payload missing/mis-attributed: {data_lines:?}"
         );
         assert!(lines.iter().any(|l| l.kind == Kinds::Note && l.text.contains("link ended")), "no link-end note");
+    }
+
+    #[test]
+    fn decompresses_a_text_compressed_payload() {
+        let bw = FmBandwidth::Narrow;
+        let m = Modulator::new(bw);
+        let mut rand = rng();
+        let opt = TxOptions { drive_db: -5.0, pre_signal: false };
+        let key = call_hash(b"N1CALL");
+        let rec = Record::from_index(2).unwrap();
+        let flen = bw.level(rec).frame_bytes();
+
+        let msg = b"CQ CQ de N0CALL, pleased to meet you on FM";
+        let enc = textcomp::compress(msg, 200, textcomp::START_STATE);
+        assert_eq!(enc.consumed, msg.len(), "whole message should fit the frame");
+
+        let mut x = vec![0.0; 24000];
+        // A registered connect advertising text compression (code 1).
+        let mut r0v = Record0::connect("N0CALL", "N1CALL", "", "", true, false);
+        r0v.compression = 1;
+        let r0 = r0v.to_bytes().unwrap();
+        x.extend(m.transmission(Record::Connect, 0, &[&r0[..]], 21, opt, &mut rand));
+        x.extend(std::iter::repeat_n(0.0, 24000));
+        // The caller's first frame, text-compressed.
+        let d0 = build_data(rec, flen, &enc.bytes, true, 3, false, Trailer { lead_report: 1, level: 0, chain_snr: None });
+        x.extend(m.transmission(rec, key, &[&d0[..]], 2, opt, &mut rand));
+        x.extend(std::iter::repeat_n(0.0, 24000));
+
+        let mut mon = FmMonitor::new(bw, &Opts::default());
+        let lines = feed_all(&mut mon, &x);
+        let want = format!("N0CALL> {}", std::str::from_utf8(msg).unwrap());
+        assert!(
+            lines.iter().any(|l| l.kind == Kinds::Data && l.text == want),
+            "decompressed text not found: {:?}",
+            lines.iter().filter(|l| l.kind == Kinds::Data).map(|l| &l.text).collect::<Vec<_>>()
+        );
     }
 
     #[test]
