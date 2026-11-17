@@ -164,8 +164,8 @@ along with KISS for applications such as Pat. See the README for full details.
 
 :   Release PTT after *N* seconds max, 1-120 (default 30).
 
-**--registered**
-:   Enable registered speeds (must set build flag)
+**--unregistered**
+:   Cap the link at unregistered VARA speeds (default: full speed)
 
 **-h**, **--help**, **-V**, **--version**
 

@@ -95,7 +95,8 @@ fn defaults() -> Args {
         ui_control: false,
         ui_token: None,
         state_dir: None,
-        registered: false,
+        // Full speed by default; --unregistered caps the link like an unregistered VARA.
+        registered: true,
         offer_level: None,
         radio: false,
         ptt: None,
@@ -169,11 +170,9 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--syslog" => a.syslog = Some(v()?),
         "--syslog-name" => a.syslog_name = Some(v()?),
         "--list-devices" => a.list_devices = true,
-        #[cfg(feature = "registered")]
+        // Kept so old command lines and configs still parse; full speed is the default now.
         "--registered" => a.registered = true,
-        #[cfg(not(feature = "registered"))]
-        "--registered" => return Err("not built with registered features".into()),
-        #[cfg(feature = "registered")]
+        "--unregistered" => a.registered = false,
         "--offer-level" => a.offer_level = Some(num(k, &v()?)?),
         _ if k == "--trusdx-speaker" => return Err(format!("{k}: xara was built without the trusdx feature")),
         _ => return Err(format!("unknown option {k}")),
@@ -934,6 +933,14 @@ mod tests {
         assert_eq!((a.call.as_str(), a.radio, a.quiet, a.ui.port), ("N2CALL", true, false, Some(8080)));
         assert_eq!(a.ui.hosts, ["a.lan", "b.lan"]);
         std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn full_speed_by_default_and_unregistered_opts_out() {
+        let speed = |s: &str| parse(&argv(&format!("{s} --capture c --playback xara_tx"))).unwrap().unwrap().registered;
+        assert!(speed("--call N2CALL"));
+        assert!(speed("--call N2CALL --registered"));
+        assert!(!speed("--call N2CALL --unregistered"));
     }
 
     #[test]

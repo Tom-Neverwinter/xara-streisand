@@ -173,7 +173,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --kiss-port N|off       KISS TCP port (default: 8100)
     --persistence P         KISS p-persistence
 
-    --registered            enable registered speeds (must set build flag)
+    --unregistered          cap the link at unregistered VARA speeds (default: full speed)
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
@@ -248,10 +248,13 @@ options:
     --syslog-name NAME      station name in syslog messages (default: xara-monitor)
     --version and --help    guess
 
-## registered mode
+## full speed
 
-compile with the `registered` feature for higher speeds if you have a
-registered copy of VARA, then run with `xara --registered ...`.
+xara runs at full speed out of the box: every level of the bandwidth, plus
+compression, with no license key and no special build. `--unregistered`
+caps a link the way an unregistered VARA would (HF level 4, FM level 2, no
+compression), e.g. to match a test setup. `--registered` is still accepted
+and does nothing.
 
 ## copyright
 
