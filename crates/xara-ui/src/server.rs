@@ -224,6 +224,7 @@ fn serve(
     Ok(UiServer { addr: local })
 }
 
+#[cfg(unix)]
 fn hostname() -> Option<String> {
     let mut b = [0u8; 256];
     // SAFETY: b is valid for its length; gethostname writes at most that many bytes.
@@ -235,9 +236,48 @@ fn hostname() -> Option<String> {
     (!h.is_empty()).then(|| h.to_string())
 }
 
+#[cfg(not(unix))]
+fn hostname() -> Option<String> {
+    // Windows exposes the machine name in the environment.
+    let h = std::env::var("COMPUTERNAME").ok()?;
+    let h = h.trim();
+    (!h.is_empty()).then(|| h.to_string())
+}
+
+/// Fill `buf` with cryptographically secure random bytes from the OS.
+#[cfg(unix)]
+fn fill_random(buf: &mut [u8]) -> io::Result<()> {
+    std::fs::File::open("/dev/urandom")?.read_exact(buf)
+}
+
+#[cfg(not(unix))]
+fn fill_random(buf: &mut [u8]) -> io::Result<()> {
+    // Windows CSPRNG: BCryptGenRandom with the system-preferred RNG (no algorithm
+    // handle needed). The modern successor to /dev/urandom and RtlGenRandom.
+    #[link(name = "bcrypt")]
+    unsafe extern "system" {
+        fn BCryptGenRandom(
+            h_algorithm: *mut core::ffi::c_void,
+            pb_buffer: *mut u8,
+            cb_buffer: u32,
+            dw_flags: u32,
+        ) -> i32;
+    }
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+    if buf.is_empty() {
+        return Ok(());
+    }
+    // SAFETY: buf is valid for cb_buffer bytes; a null algorithm handle is allowed
+    // with BCRYPT_USE_SYSTEM_PREFERRED_RNG.
+    let status = unsafe {
+        BCryptGenRandom(core::ptr::null_mut(), buf.as_mut_ptr(), buf.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
+    };
+    if status == 0 { Ok(()) } else { Err(io::Error::other(format!("BCryptGenRandom failed: {status:#010x}"))) }
+}
+
 pub fn new_token() -> io::Result<String> {
     let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+    fill_random(&mut b)?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
@@ -245,14 +285,40 @@ pub fn valid_token(t: &str) -> bool {
     (8..=128).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// Re-tighten an existing token file to owner-only (Unix). On Windows the file's
+/// protection comes from the per-user config directory's ACLs, so this is a no-op.
+#[cfg(unix)]
+fn harden_token(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if std::fs::metadata(path)?.permissions().mode() & 0o077 != 0 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn harden_token(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+/// Create the token temp file. Unix opens it 0600; Windows relies on the
+/// per-user config directory's ACLs (there is no portable mode bit).
+#[cfg(unix)]
+fn create_token_file(tmp: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(tmp)
+}
+
+#[cfg(not(unix))]
+fn create_token_file(tmp: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)
+}
+
 pub fn stored_token(dir: &Path) -> io::Result<String> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let path = dir.join(TOKEN_FILE);
     match std::fs::read_to_string(&path) {
         Ok(t) if valid_token(t.trim()) => {
-            if std::fs::metadata(&path)?.permissions().mode() & 0o077 != 0 {
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-            }
+            harden_token(&path)?;
             return Ok(t.trim().to_string());
         }
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
@@ -264,7 +330,7 @@ pub fn stored_token(dir: &Path) -> io::Result<String> {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut f = create_token_file(&tmp)?;
     writeln!(f, "{t}")?;
     f.sync_all()?;
     std::fs::rename(&tmp, &path)?;

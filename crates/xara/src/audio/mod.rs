@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(pulse, alsa, coreaudio)), expect(dead_code))]
+#![cfg_attr(not(any(pulse, alsa, coreaudio, windows)), expect(dead_code))]
 
 #[cfg(alsa)]
 pub mod alsa;
@@ -14,9 +14,10 @@ pub mod ratematch;
 #[cfg(feature = "trusdx")]
 pub mod trusdx;
 pub mod txpath;
+#[cfg(windows)]
+pub mod winmm;
 
-// Off Unix (Windows) there is no audio backend yet: the build is for
-// xara-monitor reading WAV files or stdin, and open_capture() says so.
+// On Windows the backend is WinMM (winmm.rs).
 #[cfg(all(unix, not(any(pulse, alsa, coreaudio, feature = "trusdx"))))]
 compile_error!("xara needs an audio backend: enable the pulse or alsa feature, or build on macOS for CoreAudio");
 
@@ -79,7 +80,6 @@ pub trait Audio {
     fn queued(&mut self) -> io::Result<Option<Queue>>;
     fn backlog(&mut self) -> io::Result<Option<usize>>;
     fn path(&mut self) -> io::Result<Path>;
-    #[cfg(unix)]
     fn ptt(&self) -> Option<Box<dyn crate::ptt::Ptt>> {
         None
     }
@@ -174,11 +174,14 @@ pub enum Backend {
     Alsa,
     CoreAudio,
     Trusdx,
+    Winmm,
 }
 
 impl Default for Backend {
     fn default() -> Self {
-        if cfg!(coreaudio) {
+        if cfg!(windows) {
+            Self::Winmm
+        } else if cfg!(coreaudio) {
             Self::CoreAudio
         } else if cfg!(pulse) {
             Self::Pulse
@@ -197,6 +200,7 @@ impl std::str::FromStr for Backend {
             "alsa" => Self::Alsa,
             "coreaudio" => Self::CoreAudio,
             "trusdx" => Self::Trusdx,
+            "winmm" => Self::Winmm,
             _ => {
                 let built: Vec<_> = Self::ALL.into_iter().filter(|b| b.built()).map(Self::name).collect();
                 return Err(format!("--audio {s:?}: expected {}", crate::cli::either(&built)));
@@ -207,7 +211,7 @@ impl std::str::FromStr for Backend {
 }
 
 impl Backend {
-    const ALL: [Self; 4] = [Self::Pulse, Self::Alsa, Self::CoreAudio, Self::Trusdx];
+    const ALL: [Self; 5] = [Self::Pulse, Self::Alsa, Self::CoreAudio, Self::Trusdx, Self::Winmm];
 
     pub fn built(self) -> bool {
         match self {
@@ -215,6 +219,7 @@ impl Backend {
             Self::Alsa => cfg!(alsa),
             Self::CoreAudio => cfg!(coreaudio),
             Self::Trusdx => cfg!(feature = "trusdx"),
+            Self::Winmm => cfg!(windows),
         }
     }
 
@@ -224,13 +229,16 @@ impl Backend {
             Self::Alsa => "alsa",
             Self::CoreAudio => "coreaudio",
             Self::Trusdx => "trusdx",
+            Self::Winmm => "winmm",
         }
     }
 }
 
 fn unbuilt_why(b: Backend) -> String {
-    if cfg!(not(unix)) {
-        "live audio is not supported on this platform yet; record a WAV and use --wav".into()
+    if b == Backend::Winmm {
+        "winmm is only available on Windows".into()
+    } else if cfg!(windows) {
+        format!("{} is not available on Windows; use winmm", b.name())
     } else if b == Backend::CoreAudio {
         "coreaudio is only available on macOS".into()
     } else if cfg!(target_os = "macos") && b != Backend::Trusdx {
@@ -244,7 +252,7 @@ fn unbuilt(b: Backend) -> io::Error {
     io::Error::other(unbuilt_why(b))
 }
 
-#[cfg_attr(not(all(feature = "trusdx", any(pulse, alsa, coreaudio))), expect(unused_variables))]
+#[cfg_attr(not(all(feature = "trusdx", any(pulse, alsa, coreaudio, windows))), expect(unused_variables))]
 pub fn open(
     b: Backend,
     capture: &str,
@@ -262,11 +270,13 @@ pub fn open(
         Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio, tx)?)),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open(capture, playback, radio, speaker)?)),
+        #[cfg(windows)]
+        Backend::Winmm => Ok(Box::new(winmm::WinmmIo::open(capture, playback, radio, tx)?)),
         _ => Err(unbuilt(b)),
     }
 }
 
-#[cfg_attr(not(any(pulse, alsa, coreaudio)), expect(unused_variables))]
+#[cfg_attr(not(any(pulse, alsa, coreaudio, windows)), expect(unused_variables))]
 pub fn check_playback(b: Backend, playback: &str, radio: bool) -> io::Result<()> {
     match b {
         #[cfg(pulse)]
@@ -277,6 +287,8 @@ pub fn check_playback(b: Backend, playback: &str, radio: bool) -> io::Result<()>
         Backend::CoreAudio => coreaudio::check(playback, radio),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => trusdx::check(playback),
+        #[cfg(windows)]
+        Backend::Winmm => winmm::check(playback, radio),
         _ => Err(unbuilt(b)),
     }
 }
@@ -291,12 +303,12 @@ pub fn list(b: Backend) -> io::Result<(DeviceList, DeviceList)> {
         Backend::CoreAudio => coreaudio::list(),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => trusdx::list(),
+        #[cfg(windows)]
+        Backend::Winmm => winmm::list(),
         _ => Err(unbuilt(b)),
     }
 }
 
-// Never true on Unix (the compile_error above), so this only affects Windows.
-#[cfg_attr(not(any(pulse, alsa, coreaudio, feature = "trusdx")), expect(unused_variables))]
 pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
     match b {
         #[cfg(pulse)]
@@ -307,6 +319,8 @@ pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
         Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open_capture(capture)?)),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open_capture(capture)?)),
+        #[cfg(windows)]
+        Backend::Winmm => Ok(Box::new(winmm::WinmmIo::open_capture(capture)?)),
         _ => Err(unbuilt(b)),
     }
 }

@@ -52,6 +52,16 @@ jobs:
       - run: cargo +"$RUST" clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo +"$RUST" test --locked --release --workspace
 
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: echo "RUST=$(cat .rust-version)" >> "$GITHUB_ENV"
+      - run: rustup toolchain install "$env:RUST" --profile minimal --component clippy
+      - run: cargo +"$env:RUST" clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo +"$env:RUST" test --locked --release --workspace
+
   freebsd:
     runs-on: ubuntu-24.04
     env:

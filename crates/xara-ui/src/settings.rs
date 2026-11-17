@@ -153,6 +153,8 @@ fn device_ok(v: &str) -> bool {
         && !v.split([':', ',', '=']).any(|t| t == "file" || t == "tee")
 }
 
+// Used by store() (Unix) and the tests; on a non-test Windows build it is unused.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) fn render(kv: &Pairs) -> String {
     kv.iter().map(|(k, v)| format!("{k} = {v}\n")).collect()
 }

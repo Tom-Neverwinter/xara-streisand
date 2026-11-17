@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (xara-streisand)
+
+maintained fork of x0rro/xara after upstream was withdrawn.
+
+- Windows: the TNC runs natively (WinMM audio; serial RTS/DTR, rigctld and VOX PTT; console Ctrl-C), and `xara-monitor` plus its web UI build and run there
+- `xara-monitor --fm narrow|wide`: passive VARA FM decode (connects, CQ, session text), also in the web UI
+- host ports close connections that open with an HTTP request line, so a web page can't drive the TNC
+- CI adds a Windows job
+- docs: platform support table, Windows build notes, contributor guide
+
 ## 0.1.3
 
 - macOS / CoreAudio support thanks to NR5P's work in x0rro/xara#19
