@@ -697,7 +697,13 @@ mod tests {
         for p in &mut c {
             p.set(true).unwrap();
         }
-        thread::sleep(Duration::from_millis(30));
+        // Wait until every PTT thread has really keyed: a fixed sleep raced on loaded machines, and a
+        // controller that never keyed has nothing to release, so finish() came back Ok.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !watched().iter().all(|w| !w.released.load(Ordering::SeqCst)) {
+            assert!(Instant::now() < deadline, "PTT threads never keyed");
+            thread::sleep(Duration::from_millis(1));
+        }
         let t0 = Instant::now();
         assert!(thread::spawn(|| panic!("test panic")).join().is_err());
         let took = t0.elapsed();
