@@ -9,6 +9,37 @@ xara-streisand is a maintained fork of [XARA](https://github.com/x0rro/xara) (MI
 
 Tested against VARA HF 4.9.0 and VARA FM 4.4.0. Help is welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Goal: the whole VARA suite, one free program
+
+The aim is full compatibility with the entire VARA family, in one program that anyone can set up for free on any common OS. Wherever VARA can talk to VARA, xara should talk to either one.
+
+| VARA product | xara today |
+|---|---|
+| VARA HF (500 / 2300 / 2750) | Working. Decodes real on-air VARA HF, including full Winlink sessions |
+| VARA FM (narrow / wide) | Working xara-to-xara. Interop with real VARA FM still unproven |
+| VARA SAT | Not yet (the HF-2300 waveform plus Doppler shift) |
+| VARA Chat / VARA Terminal | xara speaks their TCP interface. End-to-end tests against the real apps are still pending |
+| Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` |
+
+Open gaps are tracked in the issues. Pick one up, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Who transmits
+
+**This project does not transmit, and neither do its developers.** Everything here is built and tested without a radio: recorded test vectors, simulated links, and audio routed between programs over virtual cables (xara ↔ xara, xara ↔ VARA on the same machine). That gets very close to on-air behaviour without anyone keying up.
+
+Putting a signal on the air is the job of a **licensed amateur radio operator**, using their own station under their own country's rules. `xara` refuses to drive a real audio device unless you pass `--radio`, so a test setup can't transmit by accident. If you are licensed and test on air, please report what you find in an issue (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## Make your own copy (please don't fork)
+
+Please **don't press GitHub's Fork button**. Clone the repo and push it to a new repository of your own with a funny name instead: `xara-streisand` was taken, but `xara-the-explorer`, `vara-not-vara`, `xarazilla` and `modem-mc-modemface` are all yours for the taking. Copies outside one fork network are harder to lose in one go, and that is the point of the name.
+
+    git clone https://github.com/Tom-Neverwinter/xara-streisand my-funny-name
+    cd my-funny-name
+    git remote set-url origin https://github.com/YOU/my-funny-name.git
+    git push -u origin main
+
+Keep `LICENSE` and the copyright notice (MIT requires it). To send a change back, open an issue here that links the branch in your copy, and it gets pulled from there. (GitHub only opens pull requests between forks.)
+
 ## Platform support
 
 | OS | Audio (`--audio`) | PTT (`--ptt`) | Status |

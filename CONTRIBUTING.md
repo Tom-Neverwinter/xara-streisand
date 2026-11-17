@@ -1,20 +1,37 @@
 # contributing
 
 thanks for helping. xara-streisand keeps the open XARA modem alive after
-upstream withdrew it: VARA-compatible, documented, and buildable on any
-common OS. it is a reference implementation of VARA's protocol and a
-bridge for stations that still speak it. it is not an everything-modem or
-an app. if you want to build those on top of xara, please do, in your own
-repo.
+upstream withdrew it. the goal is complete compatibility with the whole
+VARA suite (HF, FM, SAT, and the Chat / Terminal apps' modem side) in one
+free program that is easy to set up on any common OS. it is not an
+everything-modem: features VARA doesn't have belong in your own repo.
+
+## don't fork, copy
+
+please don't use GitHub's Fork button. clone and push to your own repo
+with a funny name (see the README), and keep `LICENSE`. to contribute,
+open an issue here that links your branch. that issue is where review
+happens. the README has the commands.
+
+## nobody here transmits
+
+developers test without a radio: test vectors, simulated links, and audio
+routed over virtual cables (xara ↔ xara, or xara ↔ real VARA on the same
+machine). on-air testing is done only by licensed operators, on their own
+stations, under their own rules. never add code that keys a transmitter
+without `--radio` and an explicit `--ptt`.
 
 ## what we take
 
 - bug fixes, with a test that fails without the fix
 - platform work: Windows, macOS, BSDs, ARM boards, Android/Termux, new
   audio backends, PTT methods
-- interop reports: "client X against xara on OS Y with radio Z: works or
-  fails like this", with logs (`--log`) and, if you can, a recording
-  (`--record`) of **your own** test traffic
+- interop reports: "client X against xara on OS Y: works, or fails like
+  this", with logs (`--log`) and, if you can, a recording (`--record`) of
+  **your own** test traffic. virtual-cable loopback reports are as welcome
+  as on-air ones from licensed operators. say which kind it was.
+- closing a suite gap: VARA FM interop, VARA SAT, end-to-end runs with
+  VARA Chat / Terminal / VarAC / Pat (see the README's goal table)
 - packaging, CI, docs, and tests
 
 open an issue first for anything large, so nobody duplicates work.
@@ -55,7 +72,7 @@ no radio or sound card is needed: the test suite replays recorded vectors
 | `xara` | the binaries: CLI, audio backends, PTT, station glue | `src/tnc_main.rs`, `src/audio/`, `src/ptt.rs` |
 | `xara-testkit` | test-only helpers | |
 
-### before you open a PR
+### before you send a change
 
 run what CI runs (Linux shown; drop the pulse/alsa lines on macOS and
 Windows):
@@ -69,7 +86,7 @@ Windows):
 
 CI covers Linux (x86_64, arm64, armv7 under qemu), macOS, Windows, a
 FreeBSD type-check and the MSRV build. if you can only test one OS, say so
-in the PR.
+in your issue.
 
 ### cross-platform code
 
