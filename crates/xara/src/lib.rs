@@ -18,6 +18,7 @@ pub mod monitor;
 pub mod ptt;
 pub mod record;
 pub mod resample;
+pub mod shift;
 #[cfg(unix)]
 pub mod signals;
 pub mod station;
