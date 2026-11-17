@@ -31,7 +31,19 @@ Putting a signal on the air is the job of a **licensed amateur radio operator**,
 
 ## Make your own copy (please don't fork)
 
-Please **don't press GitHub's Fork button**. Clone the repo and push it to a new repository of your own with a funny name instead: `xara-streisand` was taken, but `xara-the-explorer`, `vara-not-vara`, `xarazilla` and `modem-mc-modemface` are all yours for the taking. Copies outside one fork network are harder to lose in one go, and that is the point of the name.
+Please **don't press GitHub's Fork button**. Clone the repo and push it to a new repository of your own with a funny name instead. Copies outside one fork network are harder to lose in one go, and that is the point of the name. `xara-streisand` is taken, but these are all yours for the taking:
+
+- `maga-hertz`: it's a radio unit, and it was right there
+- `signalgate-but-its-ham-radio`: at least our group chat is supposed to be public
+- `epstein-files-release-date-tbd`: the only source in Washington you can read unredacted
+- `pardon-my-modem` (Roger Stone not included)
+- `matt-gaetz-ag-for-8-days`: this modem has already lasted longer
+- `sharpie-forecast-modem`: NOAA got cut, draw your own hurricane cone
+- `fema-404-not-found`: emergency comms that work when the agency doesn't
+- `cpb-cant-rescind-this`: you can't claw back an MIT license
+- `brendan-carr-cant-revoke-this`: the FCC can pull a license, not a `git clone`
+- `doge-this`: already costs $0, efficiency achieved
+- `big-beautiful-bandwidth`, `liberation-day-for-your-radio`, `covfefe-error-correction`, `no-kings-just-qsos`
 
     git clone https://github.com/Tom-Neverwinter/xara-streisand my-funny-name
     cd my-funny-name
@@ -163,7 +175,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --kiss-port N|off       KISS TCP port (default: 8100)
     --persistence P         KISS p-persistence
 
-    --registered            enable registered speeds (must set build flag)
+    --unregistered          cap the link at unregistered VARA speeds (default: full speed)
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
@@ -248,10 +260,13 @@ options:
     --log FILE              append UTC-timestamped output to FILE
     --version and --help    guess
 
-## registered mode
+## full speed
 
-compile with the `registered` feature for higher speeds if you have a
-registered copy of VARA, then run with `xara --registered ...`.
+xara runs at full speed out of the box: every level of the bandwidth, plus
+compression, with no license key and no special build. `--unregistered`
+caps a link the way an unregistered VARA would (HF level 4, FM level 2, no
+compression), e.g. to match a test setup. `--registered` is still accepted
+and does nothing.
 
 ## copyright
 
