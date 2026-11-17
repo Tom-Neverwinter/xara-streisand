@@ -126,9 +126,9 @@ Voicemeeter, …), so a test run can't key a real radio by accident.
 
 ### known gaps
 
-- the web UI runs but cannot save settings (saving is Unix-only for now).
-  pass options on the command line or in `--config FILE`.
-- no service files yet: run it from a console or Task Scheduler.
+- no Windows service: xara needs your audio devices, so it runs as a
+  per-user logon task instead. `dist\windows\xara-task.ps1` registers it
+  (config `%APPDATA%\xara\xara.conf`, log `%APPDATA%\xara\xara.log`).
 - WinMM is the only backend (no WASAPI or ASIO).
 
 ## everything else

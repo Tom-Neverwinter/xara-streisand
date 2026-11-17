@@ -292,8 +292,20 @@ fn default_config() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("xara/xara.conf")).filter(|p| p.exists())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    let path = match base {
+        Some(b) => b.join("xara/xara.conf"),
+        None => windows_app_dir()?.join("xara.conf"),
+    };
+    Some(path).filter(|p| p.exists())
+}
+
+/// `%APPDATA%\xara` on Windows, where the config file and the web UI's settings live by default.
+fn windows_app_dir() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    std::env::var_os("APPDATA").filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("xara"))
 }
 
 fn with_config(argv: &[String]) -> Result<(Option<PathBuf>, Vec<String>), String> {
@@ -330,7 +342,9 @@ fn tail_samples(a: &Args) -> i64 {
 
 fn state_dir(a: &Args) -> Option<PathBuf> {
     let env = std::env::var("STATE_DIRECTORY").ok();
-    let dir = a.state_dir.clone().or_else(|| env.and_then(|e| e.split(':').next().map(String::from)))?;
+    let Some(dir) = a.state_dir.clone().or_else(|| env.and_then(|e| e.split(':').next().map(String::from))) else {
+        return windows_app_dir();
+    };
     (!dir.is_empty()).then(|| PathBuf::from(dir))
 }
 
