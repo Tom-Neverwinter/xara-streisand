@@ -167,6 +167,12 @@ along with KISS for applications such as Pat. See the README for full details.
 **--unregistered**
 :   Cap the link at unregistered VARA speeds (default: full speed)
 
+**--registered**
+:   No-op, kept so old configs still work
+
+**--offer-level** *N*
+:   HF: offer speed level N at link start instead of picking from S/N
+
 **-h**, **--help**, **-V**, **--version**
 
 :   Print the usage or the version and exit.
