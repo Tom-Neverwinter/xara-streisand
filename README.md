@@ -21,7 +21,7 @@ The aim is full compatibility with the entire VARA family, in one program that a
 | VARA Chat / VARA Terminal | xara speaks their TCP interface. End-to-end tests against the real apps are still pending |
 | Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` |
 
-Open gaps are tracked in the issues. Pick one up, see [CONTRIBUTING.md](CONTRIBUTING.md).
+The full feature-by-feature chart, with the test behind each line and the open gaps in priority order, is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Pick a gap up, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Who transmits
 
@@ -175,6 +175,8 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --persistence P         KISS p-persistence
 
     --unregistered          cap the link at unregistered VARA speeds (default: full speed)
+    --registered            no-op, kept so old configs still work
+    --offer-level N         HF: offer speed level N at link start instead of picking from S/N
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
