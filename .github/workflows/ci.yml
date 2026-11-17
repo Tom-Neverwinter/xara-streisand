@@ -73,6 +73,22 @@ jobs:
       - run: rustup toolchain install "$RUST" --profile minimal --component clippy --target x86_64-unknown-freebsd
       - run: cargo +"$RUST" clippy --locked --workspace --all-targets --target x86_64-unknown-freebsd -- -D warnings
 
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "RUST=$(cat .rust-version)" >> "$GITHUB_ENV"
+      - run: >-
+          rustup toolchain install "$RUST" --profile minimal
+          --target aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      # The headless modem (KISS/TCP TNC + web UI, no local audio) must keep
+      # compiling for Android. `check` does not link, so no NDK is needed here.
+      - name: headless modem compiles for Android
+        run: |
+          for t in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            cargo +"$RUST" check --locked --no-default-features -p xara -p xara-ui --target "$t"
+          done
+
   msrv:
     runs-on: ubuntu-24.04
     steps:
