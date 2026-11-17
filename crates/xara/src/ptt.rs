@@ -76,7 +76,7 @@ impl PttSpec {
             "dtr" => path("dtr").map(Self::Dtr),
             "cm108" if NO_HIDRAW && rest.starts_with('/') => Err(format!(
                 "--ptt cm108: {} has no hidraw; use cm108:VID:PID[:GPIO] (4-digit hex USB ids)",
-                std::env::consts::OS
+                if cfg!(windows) { "Windows" } else { "macOS" }
             )),
             "cm108" => Self::cm108(rest).ok_or_else(|| {
                 let dev = if NO_HIDRAW { "" } else { "/dev/hidrawN[:GPIO] or " };
