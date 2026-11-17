@@ -83,6 +83,7 @@ container on x86_64:
     --radio                 enable radio mode
     --drive-db D            TX drive (<= 0 dB, default -5)
     --ptt [see section]     PTT has a lot of options
+    --rig-freq HZ           tune the rig to HZ at startup via rigctld (--ptt rigctld's address)
 
     --ui-port N             serve web UI on port N (default off)
     --ui-addr A             webui listen address (default 127.0.0.1)

@@ -167,6 +167,10 @@ fn rigctld_protocol() {
     r.set(false).unwrap();
     assert_eq!(*log.lock().unwrap(), ["T 0", "T 1", "T 0"]);
 
+    let (addr, log) = fake_rigctld("RPRT 0");
+    Rigctld::open(&addr).unwrap().set_frequency(14_105_000).unwrap();
+    assert_eq!(*log.lock().unwrap(), ["T 0", "F 14105000"]);
+
     let (addr, _) = fake_rigctld("RPRT -11");
     let mut r = Rigctld::open(&addr).unwrap();
     assert!(r.set(true).is_err());

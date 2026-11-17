@@ -7,7 +7,7 @@ use xara::audio::ratematch::{self, TxBuffer};
 use xara::audio::txpath::TxPath;
 use xara::audio::{self, Audio, Backend, Behind};
 use xara::cli::{self, UiArgs, Usage, num};
-use xara::ptt::{PttCtl, PttSpec, PttTiming};
+use xara::ptt::{PttCtl, PttSpec, PttTiming, Rigctld};
 use xara::record::{self, Recorder};
 use xara::say;
 use xara::signals;
@@ -51,6 +51,7 @@ struct Args {
     persistence: f64,
     addr: String,
     drive_db: f64,
+    rig_freq: Option<u64>,
     quiet: bool,
     ui: UiArgs,
     ui_control: bool,
@@ -88,6 +89,7 @@ fn defaults() -> Args {
         persistence: xara_arq::hf::broadcast::DEFAULT_PERSISTENCE,
         addr: xara::DEFAULT_ADDR.into(),
         drive_db: DEFAULT_DRIVE_DB,
+        rig_freq: None,
         quiet: false,
         ui: UiArgs::default(),
         ui_control: false,
@@ -143,6 +145,7 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--persistence" => a.persistence = finite(k, &v()?)?.clamp(0.0, 1.0),
         "--addr" => a.addr = v()?,
         "--drive-db" => a.drive_db = finite(k, &v()?)?,
+        "--rig-freq" => a.rig_freq = Some(num(k, &v()?)?),
         "--quiet" => a.quiet = true,
         "--ui-control" => a.ui_control = true,
         "--ui-token" => {
@@ -726,6 +729,15 @@ fn real_main() -> Result<ExitCode, String> {
     xara::log::init("xara", base.quiet);
     if let Some(p) = &base.log {
         xara::log::open(p).map_err(|e| format!("--log {}: {e}", p.display()))?;
+    }
+    if let Some(hz) = base.rig_freq {
+        // the rig named by --ptt rigctld[:HOST:PORT], else rigctld's default address
+        let addr = match &base.ptt {
+            Some(PttSpec::Rigctld(a)) => a.clone(),
+            _ => xara::ptt::RIGCTLD_DEFAULT.to_string(),
+        };
+        Rigctld::open(&addr).and_then(|mut r| r.set_frequency(hz)).map_err(|e| format!("--rig-freq {hz}: {e}"))?;
+        say!("rig tuned to {hz} Hz via rigctld at {addr}");
     }
     if let Some(p) = &config {
         say!("config {}", p.display());
