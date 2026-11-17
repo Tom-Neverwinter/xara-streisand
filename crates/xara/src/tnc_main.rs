@@ -1056,13 +1056,14 @@ mod tests {
     #[test]
     fn setup_asks_and_writes_a_config() {
         let dev = |n: &str| Device { name: n.into(), desc: String::new() };
-        let d = Devices { backend: "winmm", capture: vec![dev("Mic"), dev("Line In")], playback: vec![dev("Speakers")] };
-        let answers = "bad call!\nn0xra\nfm wide\n9\n2\n1\nrts:COM3\ny\n";
+        let d =
+            Devices { backend: "winmm", capture: vec![dev("Mic"), dev("Line In")], playback: vec![dev("Speakers")] };
+        let answers = "bad call!\nn0xra\nfm wide\n9\n2\n1\nrigctld\ny\n";
         let text = setup_with(&mut answers.as_bytes(), &mut Vec::new(), &d, Path::new("x.conf")).unwrap();
         assert_eq!(
             text,
             "# written by xara --setup; keys are xara options without the leading --\ncall = N0XRA\nfm = wide\n\
-             audio = winmm\ncapture = Line In\nplayback = Speakers\nradio = yes\nptt = rts:COM3\n"
+             audio = winmm\ncapture = Line In\nplayback = Speakers\nradio = yes\nptt = rigctld\n"
         );
         let text = setup_with(&mut "N0XRA\n\n1\n1\n\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).unwrap();
         assert!(text.contains("hf = 2300\n") && !text.contains("radio"));
