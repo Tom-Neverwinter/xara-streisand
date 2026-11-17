@@ -47,7 +47,7 @@ Keep `LICENSE` and the copyright notice (MIT requires it). To send a change back
 | Linux (x86_64, arm64, armv7, Raspberry Pi) | `pulse` (default; also PipeWire), `alsa` | rts/dtr, cm108, rigctld, vox | Primary platform. CI on every push |
 | macOS (Apple Silicon, Intel) | `coreaudio` | rts/dtr, cm108 (by USB id), rigctld, vox | CI-tested |
 | FreeBSD | `pulse`, `alsa` | rts/dtr, cm108 (via `hidraw`), rigctld, vox | CI type-checked |
-| Windows 10/11 | `winmm` | rts/dtr (`COM3`), rigctld, vox. No cm108 yet | New in this fork. Tests pass locally. The web UI cannot save settings yet. **Needs on-air testers** |
+| Windows 10/11 | `winmm` | rts/dtr (`COM3`), rigctld, vox. No cm108 yet | New in this fork. Tests pass locally. **Needs on-air testers** |
 | (tr)uSDX | `trusdx` (audio over the rig's USB serial) | built in | Experimental |
 
 Platform-specific dependencies and setup are in [BUILDING.md](BUILDING.md).
