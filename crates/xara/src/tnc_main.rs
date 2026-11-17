@@ -551,6 +551,7 @@ fn serve<M: Modem>(
                 token: token.clone(),
                 hosts: a.ui.hosts.clone(),
                 settings: Some(settings),
+                chat: chat_ports(a),
             };
             let ui = UiServer::bind(a.ui.addr(), p, feed, info, access)?;
             say!("UI http://{}/", ui.addr);
@@ -575,6 +576,13 @@ fn serve<M: Modem>(
         Tick { keyed: tnc.keyed(), tuning: tnc.station().tuning(), restart: tnc.restart_requested() }
     });
     Ok(Outcome { drive_db: tnc.station().options().drive_db, restart: tnc.restart_requested(), pumped })
+}
+
+/// The TNC's own host ports as the chat page reaches them (a wildcard bind is reached on loopback).
+fn chat_ports(a: &Args) -> Option<xara_ui::chat::HostPorts> {
+    let ip: std::net::IpAddr = a.addr.parse().ok()?;
+    let ip = if ip.is_unspecified() { std::net::Ipv4Addr::LOCALHOST.into() } else { ip };
+    Some(xara_ui::chat::HostPorts { cmd: (ip, a.port).into(), kiss: a.kiss_port })
 }
 
 fn pump(

@@ -153,7 +153,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --ui-addr A             webui listen address (default 127.0.0.1)
     --ui-host NAME          accept as HTTP Host for UI (repeatable)
     --ui-token T            UI token (default: random)
-    --ui-control            DANGER: remote token-holders can key radio
+    --ui-control            DANGER: remote token-holders can key radio (and use the /chat terminal)
     --state-dir DIR         web UI settings storage (default: set by systemd)
 
     --addr A                KISS/command address (default: 127.0.0.1)
@@ -231,6 +231,16 @@ options:
     --json                  print newline-delimited JSON records
     --log FILE              append UTC-timestamped output to FILE
     --version and --help    guess
+
+## terminal page
+
+with `--ui-port` and `--ui-control`, the web UI has a `/chat` page: a
+keyboard-to-keyboard terminal. set your call and bandwidth, answer calls
+(LISTEN ON) or connect to a station, and type: each line goes out as plain
+text ending in CR, and the other side's text shows as it arrives (Latin-1 or
+UTF-8). it drives xara through its own command and data ports, like any VARA
+client program, so it can't be used while another client holds them. it
+follows the UI's display themes.
 
 ## registered mode
 
