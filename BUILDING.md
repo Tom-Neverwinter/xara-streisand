@@ -18,7 +18,6 @@ the rest of this doc covers platform-specific deps and setup quirks.
 |---|---|
 | `pulse`, `alsa` | Unix audio backends, both on by default. pick one with `--no-default-features --features alsa` |
 | `trusdx` | experimental (tr)uSDX support |
-| `registered` | registered-mode speeds, for owners of a registered VARA copy (`xara --registered`) |
 | `fixed-turbo`, `float-turbo` | turbo decoder arithmetic variants, used for testing on small ARM boards |
 
 CoreAudio (macOS) and WinMM (Windows) are always built on their platform.
