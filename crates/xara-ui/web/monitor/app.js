@@ -102,7 +102,9 @@ function status(s) {
   conn.alive();
   wf.clock = s.ts;
   log.setOffset(s.epoch ?? Date.now() / 1000 - s.ts);
-  $("mode").textContent = `${s.mode ?? "HF"} ${s.bw} Hz`;
+  const fm = s.mode === "FM";
+  document.body.classList.toggle("fm", fm);
+  $("mode").textContent = fm ? "FM" : `HF ${s.bw} Hz`;
   $("calls").textContent = s.source + (s.epoch ? ` since ${new Date(s.epoch * 1000).toLocaleTimeString([], { hour12: false })}` : "");
   passband = s.passband;
   unproto = s.unproto;
