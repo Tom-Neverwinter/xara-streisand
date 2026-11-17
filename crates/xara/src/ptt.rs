@@ -277,6 +277,23 @@ impl Rigctld {
         }
         Ok(l)
     }
+
+    /// Tune the rig's dial to `hz` (rigctld `F`), e.g. once at startup with `--rig-freq`.
+    pub fn set_frequency(&mut self, hz: u64) -> io::Result<()> {
+        let l = self
+            .exchange(
+                format!(
+                    "F {hz}
+"
+                )
+                .as_bytes(),
+            )
+            .inspect_err(|_| self.link = None)?;
+        match l.trim() {
+            "RPRT 0" => Ok(()),
+            r => Err(io::Error::other(format!("rigctld {}: F {hz}: {r}", self.addr))),
+        }
+    }
 }
 
 impl Ptt for Rigctld {
