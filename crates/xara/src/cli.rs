@@ -25,7 +25,8 @@ pub fn is_meta(k: &str) -> bool {
     matches!(k, "--help" | "-h" | "--version" | "-V")
 }
 
-const README: &str = include_str!("../README.md");
+// The root README, not crates/xara/README.md: that is a git symlink, which Windows checks out as a text file.
+const README: &str = include_str!("../../../README.md");
 const FOOTER: &str = "copyright (c) 2026 x0rro\nreleased under MIT license, see LICENSE\n";
 
 pub struct Usage {
