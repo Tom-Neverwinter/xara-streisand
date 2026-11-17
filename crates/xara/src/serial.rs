@@ -83,7 +83,7 @@ impl Port {
 }
 
 #[cfg(windows)]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::upper_case_acronyms)]
 mod win {
     use std::ffi::c_void;
 
