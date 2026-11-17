@@ -257,16 +257,10 @@ mod tests {
         assert_eq!(m, kv(&[("call", "N1CALL"), ("drive-db", "-10"), ("playback", "b")]));
     }
 
-    #[test]
     #[cfg(windows)]
     #[test]
     fn windows_device_names_round_trip() {
-        let p = parse(
-            "capture = Microphone (Voicemod Virtual Au
-playback = Line (Voicemod Virtual Audio De
-",
-        )
-        .unwrap();
+        let p = parse("capture = Microphone (Voicemod Virtual Au\nplayback = Line (Voicemod Virtual Audio De\n").unwrap();
         assert_eq!(
             p,
             kv(&[("capture", "Microphone (Voicemod Virtual Au"), ("playback", "Line (Voicemod Virtual Audio De")])
@@ -274,6 +268,7 @@ playback = Line (Voicemod Virtual Audio De
     }
 
     #[cfg(unix)] // this checks store()'s symlink handling
+    #[test]
     fn store_load_save_reset() {
         let dir = std::env::temp_dir().join(format!("xara-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
