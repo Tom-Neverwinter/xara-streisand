@@ -20,8 +20,8 @@ What xara-streisand does against each part of the VARA suite, what is missing, a
 | VARA HF 4.9.0 (500 / 2300 / 2750) | ✅ | Decodes real on-air VARA HF, including full Winlink sessions. All 13 / 16 / 17 published speed levels. |
 | VARA FM 4.4.0 (narrow / wide) | ✅ | Proven against real VARA FM 4.4.1 in a lab loopback on 2026-11-18 (§6). Digipeating is xara↔xara only so far. |
 | VARA SAT 4.4.5 (QO-100) | ❌ | TX/RX frequency shift and Doppler schedules are in (`--tx-shift`, `--rx-shift`, `--doppler`). The SAT link itself is not: its speed table matches HF levels, but on air its handshake is not VARA HF's (see G10). |
-| VARA Chat 1.4.3 | 🟡 | xara is the modem Chat drives (ports 8300/8301). Not run end-to-end against the real app yet (issue #4). |
-| VARA Terminal 1.2.2 | 🟡 | Same as Chat. |
+| VARA Chat 1.4.3 | ✅ | xara is the modem Chat drives (ports 8300/8301). Run end-to-end both ways between two xara in the lab (2026-11-18) |
+| VARA Terminal 1.2.2 | ✅ | Same as Chat: run end-to-end both ways in the lab (2026-11-18) |
 | VARA HF 4.9.1 / FM 4.4.1 after 2027-01-01 | ❌ | Those versions change their on-air format on 2027-01-01 (shown publicly by K3JSJ and KT7RUN). xara speaks the 4.9.0 / 4.4.0 format. |
 | Winlink Express, Pat, VarAC, BPQ32, vARIM | 🟡 | They talk the TNC protocol in §2, which xara implements. Pat-style sessions are tested (`tnc_tcp.rs`). The real apps are untested. |
 
@@ -112,13 +112,13 @@ VARA FM's `FM Mode` setting is 1 for narrow and 2 for wide.
 
 | Feature | VARA | xara |
 |---|---|---|
-| Operating systems | Windows only | ✅ Linux, macOS, FreeBSD, Windows; Android 🔀 (`android-headless`, `android-audio`) |
+| Operating systems | Windows only | ✅ Linux, macOS, FreeBSD, Windows; Android (headless, AAudio; `docs/android.md`) |
 | Audio | Windows sound cards | ✅ PulseAudio/PipeWire, ALSA, CoreAudio, WinMM, (tr)uSDX |
 | Left / right / both sound-card channel | ✅ | ✅ `--channel left\|right\|both` on WinMM, PulseAudio, ALSA and CoreAudio (not (tr)uSDX) |
-| PTT: serial RTS/DTR, CM108 GPIO, VOX | ✅ | ✅ (CM108 on Windows 🔀 `windows-cm108`) |
-| PTT / tuning via CAT | ✅ Chat/Terminal rig lists | ✅ via hamlib `rigctld`; built-in CAT 🔀 `cat-control` |
-| Remote Syslog client | ✅ (registered only) | 🔀 `syslog` |
-| Setup screen | ✅ GUI | Web UI ✅; first-run wizard 🔀 `setup-wizard`; Windows settings save 🔀 `windows-settings` |
+| PTT: serial RTS/DTR, CM108 GPIO, VOX | ✅ | ✅ (CM108 by USB id on macOS and Windows) |
+| PTT / tuning via CAT | ✅ Chat/Terminal rig lists | ✅ via hamlib `rigctld`; built-in CAT (`--cat`, `--ptt cat`) |
+| Remote Syslog client | ✅ (registered only) | ✅ `--syslog` |
+| Setup screen | ✅ GUI | Web UI ✅; first-run wizard ✅; Windows settings save ✅ |
 | Several instances on separate ports | ✅ one folder per instance | ✅ `--port N` (data on N+1), `--kiss-port`, `--config` |
 | Recording RX/TX/PTT | ❌ | ✅ `--record` |
 | Passive monitor of other stations | Monitor log (FM) | ✅ `xara-monitor`, HF and FM, with web UI |
@@ -133,7 +133,7 @@ Every gap here can be built and tested without transmitting: two xara instances,
 | G7 | **FM Autotune: how VARA picks its reply level** | Level setting on FM nets | Ping through digipeaters is done; Autotune has no digipeater path (VARA's dialog takes only a target). Lowering the caller's drive in the ini does not change the ramp on the air. Left: VARA's byte 34 varied 0x0c/0x10/0x18 on identical audio (the target's own capture level?). Map it by varying the level into the target and reading the caller's result, which needs an unlocked desktop |
 | G8 | **FM audio equalisation** | Handhelds with slow receivers | `xara-phy/src/fm` |
 | G10 | **VARA SAT link layer** | QO-100 users | Lab test 2026-11-18, VARA SAT 4.4.5 and xara HF 2300 on one virtual audio loop: VARA SAT does not answer HF connect requests, and its own requests (0.88 s, about 485-2460 Hz) are not HF control frames at any bandwidth or at any frequency offset within ±400 Hz. Its control frames have to be worked out from recordings of its audio before xara can link with it. Issue #5 |
-| G11 | **End-to-end runs with VARA Chat, Terminal, VarAC, Pat** | Proves the client side | issue #4 |
+| G11 | **End-to-end runs with VarAC and Pat** | Proves the client side | VARA Chat and Terminal done (lab, 2026-11-18); issue #4 |
 | G12 | **The 2027 VARA format** | Talking to upgraded stations after 2027-01-01 | not started in this repo |
 
 Closed: G1 (VARA FM interop, §6), G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), G6 (`--tuner-enhancement`), G9 (`--channel`), 2026-11-18. Numbers are kept so old issue references still point somewhere.
