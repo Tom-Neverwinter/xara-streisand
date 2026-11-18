@@ -38,6 +38,7 @@ pub struct Station {
     reasm: broadcast::Reassembler,
     kiss_rx: bool,
     ignore_dcd: bool,
+    tx_busy: bool,
 }
 
 fn bitrate(bw: FmBandwidth, record: Record, tx: bool) -> Report {
@@ -62,6 +63,7 @@ impl Station {
             reasm: broadcast::Reassembler::default(),
             kiss_rx: false,
             ignore_dcd: false,
+            tx_busy: false,
         };
         s.drain();
         s
@@ -356,7 +358,9 @@ impl Modem for Station {
         {
             records.push(Record::Connect);
         }
-        if self.kiss_rx && self.c.session.state() == fm::State::Listen && self.c.tx.is_empty() {
+        // CQ and beacon frames ride in record 16 too, so a CHAT ON client (VarAC) needs it without KISS
+        let unproto_rx = self.kiss_rx || self.c.cfg.host.chat;
+        if unproto_rx && self.c.session.state() == fm::State::Listen && self.c.tx.is_empty() {
             records.push(Record::Broadcast);
         }
         self.rx.expect(&records, Some(l.nframes));
@@ -461,6 +465,13 @@ impl Modem for Station {
         let (t0, n) = (self.c.now, input.len());
         let fed = self.key_block(t0, input, output);
         self.c.now = t0 + n as Time;
+        // apply() leaves record 16 out while TX is queued; with real audio latency the
+        // queue only empties after the unkey delay, so re-arm the receiver then
+        let tx_busy = !self.c.tx.is_empty();
+        if self.tx_busy && !tx_busy {
+            self.refresh_listen();
+        }
+        self.tx_busy = tx_busy;
         let forced = self.c.tx.ptt()
             || !self.c.tx.is_empty()
             || self.c.session.state() != fm::State::Listen
