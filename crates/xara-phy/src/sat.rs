@@ -44,3 +44,49 @@ pub fn request_tones(target: &str, first: bool) -> Vec<u32> {
 pub fn synth(tones: &[u32]) -> Vec<f64> {
     tones.iter().flat_map(|&k| sine(k, SYMBOL_SAMPLES)[..SYMBOL_SAMPLES].iter().copied()).collect()
 }
+
+/// Finds `target`'s connect request in 48 kHz audio: the sample where its 31-symbol body starts, with the share of
+/// grid energy (tones 8..56) that sat on the expected tone, averaged over the body. One tone of a clean request
+/// scores near 1; noise and other calls score around 1/48. Scans in eighth-symbol steps.
+pub fn find_request(x: &[f64], target: &str, min_score: f64) -> Option<(usize, f64)> {
+    const STEP: usize = SYMBOL_SAMPLES / 8;
+    let code = connect_request(target);
+    let starts = (x.len().checked_sub(SYMBOL_SAMPLES)? / STEP) + 1;
+    // Power in each grid tone of the symbol-long window at every step.
+    let spectra: Vec<[f64; 48]> = (0..starts)
+        .map(|n| {
+            let w = &x[n * STEP..n * STEP + SYMBOL_SAMPLES];
+            std::array::from_fn(|b| {
+                let (s, c) = (sine(b as u32 + 8, SYMBOL_SAMPLES), cos_of(b as u32 + 8));
+                let (re, im) = w.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, v)| (re + v * c[i], im + v * s[i]));
+                re * re + im * im
+            })
+        })
+        .collect();
+    let span = (REQUEST_SYMBOLS - 1) * 8;
+    (0..starts.checked_sub(span)?)
+        .map(|n| {
+            let score = code
+                .iter()
+                .enumerate()
+                .map(|(i, &k)| {
+                    let p = &spectra[n + 8 * i];
+                    p[k as usize - 8] / p.iter().sum::<f64>().max(1e-12)
+                })
+                .sum::<f64>()
+                / REQUEST_SYMBOLS as f64;
+            (n * STEP, score)
+        })
+        .filter(|&(_, s)| s >= min_score)
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+fn cos_of(k: u32) -> &'static [f64] {
+    use std::sync::OnceLock;
+    static T: [OnceLock<Vec<f64>>; 64] = [const { OnceLock::new() }; 64];
+    T[k as usize].get_or_init(|| {
+        (0..SYMBOL_SAMPLES)
+            .map(|n| (2.0 * std::f64::consts::PI * f64::from(k) * n as f64 / SYMBOL_SAMPLES as f64).cos())
+            .collect()
+    })
+}

@@ -50,3 +50,21 @@ fn synth_puts_one_tone_in_each_symbol() {
         assert_eq!((8..60).max_by(|&a, &b| power(a).total_cmp(&power(b))), Some(k), "symbol {i}");
     }
 }
+
+/// A request is found for its own call, at the right sample, through noise; not for another call.
+#[test]
+fn finds_a_request_for_its_call_only() {
+    use xara_phy::sat::{PREAMBLE_SYMBOLS, find_request};
+    let mut x = vec![0.0; 3000];
+    x.extend(synth(&request_tones("N1CALL", false)));
+    x.extend(vec![0.0; 2000]);
+    let mut seed = 1u32;
+    for v in &mut x {
+        seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+        *v = *v * 0.3 + (f64::from(seed >> 16) / 32768.0 - 1.0) * 0.5; // about -6 dB S/N in the 3 kHz band
+    }
+    let (at, score) = find_request(&x, "N1CALL", 0.3).expect("found");
+    let want = 3000 + PREAMBLE_SYMBOLS * SYMBOL_SAMPLES;
+    assert!(at.abs_diff(want) <= SYMBOL_SAMPLES / 8, "at {at}, want {want}, score {score}");
+    assert_eq!(find_request(&x, "N1CALM", 0.3), None);
+}
