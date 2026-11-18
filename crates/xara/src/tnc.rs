@@ -287,7 +287,7 @@ impl<M: Modem> Tnc<M> {
     }
 
     fn echo(&self, s: &str) {
-        if self.echo || crate::log::to_file() {
+        if self.echo || crate::log::wants_lines() {
             crate::log::line(self.echo, format_args!("{:10.3} {s}", secs(self.station.now())));
         }
     }

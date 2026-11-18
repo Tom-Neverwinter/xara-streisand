@@ -147,7 +147,7 @@ fn drain(m: &mut Monitor, out: Out, ui: &mut Option<(Arc<Shared>, Heard)>) -> st
         if let Some((s, h)) = ui {
             s.line(&l, h);
         }
-        if xara::log::to_file() {
+        if xara::log::wants_lines() {
             match out.epoch {
                 Some(e) => xara::log::line(false, format_args!("{} {}", utc(e + l.t), l.text)),
                 None => xara::log::line(false, format_args!("{:9.3} {}", l.t, l.text)),
@@ -291,7 +291,7 @@ fn drain_fm(
         if let Some(p) = events {
             p.event(l.json(epoch.map(|e| e + l.t)));
         }
-        if xara::log::to_file() {
+        if xara::log::wants_lines() {
             match epoch {
                 Some(e) => xara::log::line(false, format_args!("{} {}", utc(e + l.t), l.text)),
                 None => xara::log::line(false, format_args!("{:9.3} {}", l.t, l.text)),

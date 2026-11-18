@@ -41,8 +41,22 @@ pub fn syslog(addr: &str, station: &str) -> io::Result<()> {
 fn syslog_line(at: SystemTime, args: &fmt::Arguments) {
     if let Some(s) = SYSLOG.get() {
         // <14> = facility user (1) * 8 + severity info (6); best effort, a lost datagram is fine
-        let _ = s.sock.send(format!("<14>1 {} {} {} - - - {args}", stamp(at), s.station, name()).as_bytes());
+        let _ = s.sock.send(syslog_message(&stamp(at), &s.station, name(), &args.to_string()).as_bytes());
     }
+}
+
+/// One RFC 5424 message. `msg` can carry on-air text, so CR/LF are escaped (a relay that splits on LF would
+/// otherwise log a forged line) and it is cut to fit the 2048 bytes RFC 5426 says every receiver takes.
+fn syslog_message(stamp: &str, station: &str, app: &str, msg: &str) -> String {
+    let mut m = format!("<14>1 {stamp} {station} {app} - - - {}", msg.replace('\r', "\\r").replace('\n', "\\n"));
+    if m.len() > 2048 {
+        let mut end = 2048;
+        while !m.is_char_boundary(end) {
+            end -= 1;
+        }
+        m.truncate(end);
+    }
+    m
 }
 
 pub fn init(name: &'static str, quiet: bool) {
@@ -60,6 +74,11 @@ pub fn open(path: &Path) -> io::Result<()> {
 
 pub fn to_file() -> bool {
     LOGGING.load(Ordering::Relaxed)
+}
+
+/// Whether `line` goes anywhere besides the console: a --log file or a --syslog server.
+pub fn wants_lines() -> bool {
+    to_file() || SYSLOG.get().is_some()
 }
 
 pub fn line(console: bool, args: fmt::Arguments) {
@@ -85,7 +104,7 @@ pub fn write(info: bool, args: fmt::Arguments) {
 }
 
 pub fn note(args: fmt::Arguments) {
-    if to_file() || SYSLOG.get().is_some() {
+    if wants_lines() {
         line(false, format_args!("{}: {args}", name()));
     }
 }
@@ -148,6 +167,14 @@ mod tests {
         let n = rx.recv(&mut b).unwrap();
         let s = String::from_utf8_lossy(&b[..n]);
         assert!(s.starts_with("<14>1 ") && s.ends_with(" N0CALL xara - - - xara: hello"), "{s}");
+    }
+
+    #[test]
+    fn syslog_messages_are_one_line_and_bounded() {
+        let m = syslog_message("T", "N0CALL", "xara", "hi\r\n<14>1 T N0CALL xara - - - fake");
+        assert_eq!(m, "<14>1 T N0CALL xara - - - hi\\r\\n<14>1 T N0CALL xara - - - fake");
+        let m = syslog_message("T", "N0CALL", "xara", &"é".repeat(5000));
+        assert!(m.len() <= 2048 && m.len() > 2040 && m.ends_with('é'));
     }
 
     #[test]
