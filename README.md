@@ -152,6 +152,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --list-devices          list capture and playback devices for --audio
     --capture SOURCE        audio source
     --playback SINK         audio sink
+    --channel left|right|both  side of a stereo sound card the radio is on (default both: mono)
     --tx-buffer-ms N        TX audio queue, raise on underruns (30-500, default 40)
 
     --hf 500|2300|2750      HF mode, bandwidth setting
@@ -178,6 +179,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --unregistered          cap the link at unregistered VARA speeds (default: full speed)
     --registered            no-op, kept so old configs still work
     --offer-level N         HF: offer speed level N at link start instead of picking from S/N
+    --tuner-enhancement     HF gateway: let callers' first 2 connect requests pass, so an ATU can tune
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)

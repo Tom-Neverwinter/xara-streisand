@@ -7,7 +7,9 @@ use std::ptr;
 use std::time::{Duration, Instant};
 
 use super::ratematch::{self, Queue, TxBuffer};
-use super::{Audio, BLOCK, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only, quantize, remaining, sample};
+use super::{
+    Audio, BLOCK, Channel, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only, quantize, remaining, sample,
+};
 
 type Frames = sys::snd_pcm_uframes_t;
 
@@ -541,6 +543,7 @@ struct Pcm {
     format: Format,
     width: usize,
     channels: usize,
+    pick: Option<usize>,
     buffer: usize,
     buf: Vec<u8>,
     xruns: u64,
@@ -559,6 +562,7 @@ impl Pcm {
             format: Format::FloatLE,
             width: 4,
             channels: 1,
+            pick: None,
             buffer: 0,
             buf: Vec::new(),
             xruns: 0,
@@ -578,7 +582,7 @@ impl Pcm {
         let (p, capture) = (self.pcm.0, self.dir == Direction::Capture);
         let (hw, cur) = (hw_params().map_err(&e)?, hw_params().map_err(&e)?);
         let (mut period, mut buffer) = (PERIOD, want);
-        let (mut rate, mut channels, mut dir) = (0, 1, 0);
+        let (mut rate, mut channels, mut dir) = (0, self.pick.map_or(1, |_| 2), 0);
         // SAFETY: p is an open PCM and hw is a live hw_params block.
         let found = unsafe {
             ok("snd_pcm_hw_params_any", sys::snd_pcm_hw_params_any(p, hw.0))?;
@@ -626,6 +630,9 @@ impl Pcm {
         }
         if rate != RATE {
             return Err(io::Error::other(format!("{}: ALSA did not set {RATE} Hz", self.name)));
+        }
+        if self.pick.is_some() && channels < 2 {
+            return Err(io::Error::other(format!("{}: --channel left/right needs a stereo device", self.name)));
         }
         let sw = Owned::new("snd_pcm_sw_params_malloc", sys::snd_pcm_sw_params_malloc, sys::snd_pcm_sw_params_free)
             .map_err(&e)?;
@@ -749,7 +756,7 @@ pub struct AlsaIo {
 }
 
 impl AlsaIo {
-    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer) -> io::Result<Self> {
+    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer, ch: Channel) -> io::Result<Self> {
         let cfg = Config::load()?;
         let route = cfg.resolve_playback(playback, radio)?;
         let mut play = Pcm::open(&cfg, playback, Direction::Playback)?;
@@ -760,6 +767,7 @@ impl AlsaIo {
             )));
         }
         let mut rec = Pcm::open(&cfg, capture, Direction::Capture)?;
+        (play.pick, rec.pick) = (ch.index(), ch.index());
         play.setup(tx.capacity() as Frames)?;
         if let Some(e) = short_buffer(playback, play.buffer, tx) {
             return Err(io::Error::other(e));
@@ -791,8 +799,9 @@ impl Audio for AlsaIo {
                 Err(e) => r.recover(e)?,
             }
         }
+        let at = r.pick.unwrap_or(0) * r.width;
         for (v, f) in x.iter_mut().zip(r.buf.chunks_exact(frame)) {
-            *v = get(f, r.format);
+            *v = get(&f[at..], r.format);
         }
         Ok(())
     }
@@ -801,8 +810,8 @@ impl Audio for AlsaIo {
         let Some(p) = &mut self.play else { return Err(capture_only()) };
         p.buf.clear();
         for &v in x {
-            for _ in 0..p.channels {
-                put(&mut p.buf, p.format, v);
+            for c in 0..p.channels {
+                put(&mut p.buf, p.format, if p.pick.is_none_or(|i| i == c) { v } else { 0 });
             }
         }
         let frame = p.frame();
