@@ -43,7 +43,12 @@ pub const QRT_RECEIVED: &str = "QRT Received";
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostEvent {
-    Connected { caller: String, answerer: String, vias: Vec<String>, bw: LinkBw },
+    Connected {
+        caller: String,
+        answerer: String,
+        vias: Vec<String>,
+        bw: LinkBw,
+    },
     Disconnected,
     UnableToConnect,
     TimedOut,
@@ -56,4 +61,10 @@ pub enum HostEvent {
     Sn(f64),
     RxFrame(Record),
     Log(String),
+    /// FM Ping or Autotune we sent: `call` answered (S/N it heard us at, Autotune step), or didn't (`sn` None).
+    Probe {
+        call: String,
+        sn: Option<f64>,
+        step: Option<u8>,
+    },
 }

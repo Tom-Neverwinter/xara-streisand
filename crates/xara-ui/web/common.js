@@ -27,8 +27,13 @@ const pref = {
   },
 };
 
-// Display theme: "system" (follow the OS), "sodium" or "nixie". A tiny inline
-// script in <head> applies it before paint; this keeps it in sync with the picker.
+// Display themes besides "system" (follow the OS). A tiny inline script in <head>
+// applies the saved one before paint; this fills the picker and keeps it in sync.
+const THEMES = [
+  ["sodium", "Sodium lamp"], ["nixie", "Nixie tube"], ["airport", "Airport board"], ["deco", "Art deco"],
+  ["phosphor", "Green phosphor"], ["radar", "Radar scope"], ["synthwave", "Synthwave"],
+  ["paper", "Paper log"], ["contrast", "High contrast"],
+];
 function initTheme() {
   const saved = pref.get("xara.theme", "system");
   const root = document.documentElement;
@@ -36,6 +41,7 @@ function initTheme() {
   else root.dataset.theme = saved;
   const sel = $("theme");
   if (!sel) return;
+  for (const [v, name] of THEMES) sel.add(new Option(name, v));
   sel.value = saved;
   sel.addEventListener("change", () => {
     const v = sel.value;

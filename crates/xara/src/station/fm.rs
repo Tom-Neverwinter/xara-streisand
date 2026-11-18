@@ -12,11 +12,11 @@ use xara_host::command::Bw;
 use xara_phy::busy::Busy;
 use xara_phy::dsp::quantise;
 use xara_phy::fm::ctrl::{Codebook, Side, frame_audio};
-use xara_phy::fm::frame::parse_data;
+use xara_phy::fm::frame::{Kind as RecordKind, Record0, parse_data};
 use xara_phy::fm::level::{DataLevel, FmBandwidth, Record};
 use xara_phy::fm::rx::FS;
 use xara_phy::fm::rx::receiver::{Event, Receiver, Transmission};
-use xara_phy::fm::tx::{IDLE_BEACON_LEAD_IN, Modulator, NFFT, TxOptions, tune_block};
+use xara_phy::fm::tx::{CONNECT_LEAD_IN, IDLE_BEACON_LEAD_IN, Modulator, NFFT, TxOptions, tune_block};
 use xara_ui::telemetry::Link;
 
 const SILENT_TAIL: usize = 45 * 1152;
@@ -167,8 +167,12 @@ impl Station {
                 )));
                 self.c.reports.push_back(Report::Host(HostEvent::Sn(f.snr_db + SNR_OFFSET_DB)));
                 match self.reasm.push(&f.bytes) {
-                    Some(Received::Cq(c)) if self.c.cfg.host.chat => {
-                        self.c.reports.push_back(Report::Line(c.host_line()))
+                    Some(Received::Cq(c)) => {
+                        let sn = f.snr_db + SNR_OFFSET_DB;
+                        self.c.reports.push_back(Report::Heard { call: c.call.clone(), what: "CQ", sn });
+                        if self.c.cfg.host.chat {
+                            self.c.reports.push_back(Report::Line(c.host_line()))
+                        }
                     }
                     Some(Received::Kiss(cmd, data)) => self.c.reports.push_back(Report::Kiss(cmd, data)),
                     _ => {}
@@ -180,6 +184,16 @@ impl Station {
             {
                 let ok: String = t.frames.iter().map(|f| if f.ok { '+' } else { '-' }).collect();
                 let first = t.frames.iter().find(|f| f.ok);
+                if let Some(r) = first.filter(|_| t.record == Record::Connect).and_then(|f| Record0::parse(&f.bytes)) {
+                    let what = match r.kind {
+                        RecordKind::Connect => "connect",
+                        RecordKind::Ping => "ping",
+                        RecordKind::AutoTune => "autotune",
+                        RecordKind::Reply => "reply",
+                    };
+                    let sn = first.map_or(f64::NAN, |f| f.snr_db + SNR_OFFSET_DB);
+                    self.c.reports.push_back(Report::Heard { call: r.source, what, sn });
+                }
                 let took =
                     t.record == Record::Connect && first.is_some_and(|f| self.digi.on_record0(now, &f.bytes, f.snr_db));
                 if took || self.digi.active() {
@@ -292,6 +306,19 @@ impl Station {
                 let mut r = |n: u32| rng.below(n);
                 (self.modm.transmission(*record, key, &refs, *lead, opt, &mut r), DATA_OVERHANG)
             }
+            fm::Tx::Tune { frame, level_db } => {
+                let bw = self.c.cfg.bw;
+                if self.modm.bw != bw {
+                    self.modm = Modulator::new(bw);
+                }
+                self.c.reports.push_back(bitrate(bw, Record::Connect, true));
+                let key = self.c.session.key();
+                let opt = TxOptions { drive_db: *level_db, pre_signal: false };
+                let rng = &mut self.rng;
+                let mut r = |n: u32| rng.below(n);
+                let x = self.modm.transmission(Record::Connect, key, &[frame.as_slice()], CONNECT_LEAD_IN, opt, &mut r);
+                (x, DATA_OVERHANG)
+            }
         };
         (quantised(x), tail, keyed)
     }
@@ -389,6 +416,7 @@ impl Modem for Station {
                     frames.len(),
                     frames.last().map_or(String::new(), |f| level_note(*record, f, self.c.session.has_vias()))
                 ),
+                fm::Tx::Tune { level_db, .. } => format!("tx autotune burst at {level_db} dB"),
             };
             self.c.reports.push_back(Report::Trace(format!("{what} {:?}", self.c.session.state())));
             self.c.tx.stop_tune();
@@ -479,6 +507,16 @@ impl Modem for Station {
         }
         self.drain();
         self.send_unproto();
+    }
+
+    fn probe(&mut self, target: &str, vias: &[String], tune: bool) -> bool {
+        if self.c.session.state() != fm::State::Listen || self.digi.active() {
+            return false;
+        }
+        let me = self.c.cfg.host.primary_call();
+        let ok = self.c.session.probe(self.c.now, &me, target, vias, tune);
+        self.drain();
+        ok
     }
 
     fn connect(&mut self, mycall: &str, remote: &str, vias: &[String]) -> bool {

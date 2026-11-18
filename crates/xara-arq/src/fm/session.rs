@@ -30,6 +30,24 @@ const AUTOTUNE_PERIOD: Time = SECOND * 136 / 100;
 /// How long after step 10 was due xara still waits for it before replying anyway.
 const AUTOTUNE_GRACE: Time = SECOND / 2;
 
+/// Drive level (dB) VARA FM's caller sets for each Autotune step 1..=10, and the level xara sends that step at
+/// (lab, 2026-11-18; 3, 7, 9 and 10 follow the burst ramp, which rises 5, 4, then 3 dB a step).
+pub const AUTOTUNE_LEVELS_DB: [f64; 10] = [-30.0, -25.0, -21.0, -18.0, -15.0, -12.0, -9.0, -6.0, -3.0, 0.0];
+/// How long xara waits for a Ping or Autotune answer after its last burst, plus this much per digipeater.
+const PROBE_WAIT: Time = 4 * SECOND;
+const PROBE_WAIT_PER_VIA: Time = 3 * SECOND;
+
+/// A Ping or Autotune xara is sending: the next Autotune step and when it is due, or the time to give up.
+struct Probe {
+    me: String,
+    target: String,
+    vias: Vec<String>,
+    tune: bool,
+    sent: u8,
+    next: Option<Time>,
+    give_up: Option<Time>,
+}
+
 /// An AutoTune in progress, heard from `source` addressed to our call `me`.
 struct Autotune {
     source: String,
@@ -73,8 +91,20 @@ pub enum State {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tx {
-    Ctrl { code: u32, lead: usize },
-    Data { record: Record, frames: Vec<Vec<u8>>, lead: usize },
+    Ctrl {
+        code: u32,
+        lead: usize,
+    },
+    Data {
+        record: Record,
+        frames: Vec<Vec<u8>>,
+        lead: usize,
+    },
+    /// One Autotune burst (a Connect record) at a fixed level below full drive, whatever the drive setting.
+    Tune {
+        frame: Vec<u8>,
+        level_db: f64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,6 +199,7 @@ pub struct Session {
     /// A Ping reply is on the air: tell the client CANCELPENDING once it has gone, as VARA FM does.
     ping_reply: bool,
     autotune: Option<Autotune>,
+    probe: Option<Probe>,
 
     level: Record,
     prev_level: Record,
@@ -244,6 +275,7 @@ impl Session {
             first_turn: false,
             ping_reply: false,
             autotune: None,
+            probe: None,
             data_stored: false,
             last_held: 0,
             link: Link::default(),
@@ -295,11 +327,69 @@ impl Session {
     }
 
     pub fn next_deadline(&self) -> Option<Time> {
-        let link = self.core.next_deadline(&self.link);
-        match self.autotune.as_ref().filter(|_| !self.core.transmitting) {
-            Some(a) => Some(link.map_or(a.due + AUTOTUNE_GRACE, |t| t.min(a.due + AUTOTUNE_GRACE))),
-            None => link,
+        if self.core.transmitting {
+            return None;
         }
+        let tune = self.autotune.as_ref().map(|a| a.due + AUTOTUNE_GRACE);
+        let probe = self.probe.as_ref().and_then(|p| p.next.or(p.give_up));
+        [self.core.next_deadline(&self.link), tune, probe].into_iter().flatten().min()
+    }
+
+    /// Send VARA FM's Ping to `target` (through up to two `vias`), or with `tune` its Autotune: ten bursts 1.36 s
+    /// apart, quietest first. The answer comes back as `HostEvent::Probe`.
+    pub fn probe(&mut self, now: Time, mycall: &str, target: &str, vias: &[String], tune: bool) -> bool {
+        if self.state != State::Listen || self.core.transmitting || self.probe.is_some() || vias.len() > 2 {
+            return false;
+        }
+        if tune && !vias.is_empty() {
+            return false;
+        }
+        let p = Probe {
+            me: mycall.to_string(),
+            target: target.to_string(),
+            vias: vias.to_vec(),
+            tune,
+            sent: 0,
+            next: None,
+            give_up: None,
+        };
+        self.probe = Some(p);
+        self.probe_send(now)
+    }
+
+    fn probe_send(&mut self, now: Time) -> bool {
+        let Some(p) = self.probe.as_mut() else { return false };
+        let via = |i: usize| p.vias.get(i).cloned().unwrap_or_default();
+        let wide = self.cfg.bw == FmBandwidth::Wide;
+        let mut r = Record0::connect(&p.me, &p.target, &via(0), &via(1), self.cfg.host.registered, wide);
+        r.kind = if p.tune { Kind::AutoTune } else { Kind::Ping };
+        r.control = 0x01;
+        p.sent += 1;
+        if p.tune {
+            r.snr = p.sent;
+        }
+        let Some(frame) = r.to_bytes() else {
+            self.probe = None;
+            return false;
+        };
+        p.next = None;
+        let tx = if p.tune {
+            p.next = (p.sent < AUTOTUNE_STEPS).then_some(now + AUTOTUNE_PERIOD);
+            Tx::Tune { frame, level_db: AUTOTUNE_LEVELS_DB[usize::from(p.sent - 1)] }
+        } else {
+            Tx::Data { record: Record::Connect, frames: vec![frame], lead: CONNECT_LEAD_IN }
+        };
+        self.core.transmitting = true;
+        self.core.out.push_back(Output::Tx(tx));
+        true
+    }
+
+    /// Our Ping or Autotune got its answer, or (`r` None) didn't.
+    fn probe_done(&mut self, r: Option<&Record0>) {
+        let Some(p) = self.probe.take() else { return };
+        let sn = r.map(|r| f64::from(r.snr) / 7.0);
+        let step = if p.tune { Some(r.map_or(0, |r| r.tune >> 2)) } else { None };
+        self.core.host(HostEvent::Probe { call: p.target, sn, step });
     }
 
     fn top(&self) -> DataLevel {
@@ -549,6 +639,9 @@ impl Session {
         if std::mem::take(&mut self.ping_reply) {
             self.core.host(HostEvent::CancelPending);
         }
+        if let Some(p) = self.probe.as_mut().filter(|p| p.next.is_none()) {
+            p.give_up = Some(now + PROBE_WAIT + PROBE_WAIT_PER_VIA * p.vias.len() as Time);
+        }
         let vias = self.vias.len();
         let w = match self.state {
             State::Calling => Some(caller_connect_window(self.bw, vias, false)),
@@ -586,6 +679,16 @@ impl Session {
         if self.autotune.as_ref().is_some_and(|a| now >= a.due + AUTOTUNE_GRACE) {
             self.tune_reply();
             return;
+        }
+        if let Some(p) = &self.probe {
+            if p.next.is_some_and(|t| now >= t) {
+                self.probe_send(now);
+                return;
+            }
+            if p.give_up.is_some_and(|t| now >= t) {
+                self.probe_done(None);
+                return;
+            }
         }
         if self.link.watchdog_fired(now) {
             self.core.host(HostEvent::TimedOut);
@@ -760,6 +863,15 @@ impl Session {
         }
         if r.kind == Kind::AutoTune {
             self.on_autotune(now, &r, snr_db);
+            return;
+        }
+        if r.kind == Kind::Reply {
+            let ours = self.probe.as_ref().is_some_and(|p| {
+                p.give_up.is_some() && r.source.eq_ignore_ascii_case(&p.target) && r.target.eq_ignore_ascii_case(&p.me)
+            });
+            if ours && usize::from(r.hop) == r.vias() {
+                self.probe_done(Some(&r));
+            }
             return;
         }
         if r.kind != Kind::Connect || usize::from(r.hop) != r.vias() {

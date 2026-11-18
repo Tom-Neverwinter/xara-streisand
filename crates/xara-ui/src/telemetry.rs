@@ -69,6 +69,69 @@ pub struct Bitrate {
     pub tx: bool,
 }
 
+/// The link in progress, as the UI shows it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Session {
+    pub peer: String,
+    pub since: Time,
+    /// Bytes the client handed us for this link, and bytes delivered to it.
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+}
+
+/// A finished link: `Session` plus when it ended.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Past {
+    pub session: Session,
+    pub until: Time,
+}
+
+/// A station heard on the air: what it sent last, when, and the S/N then.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Heard {
+    pub call: String,
+    pub what: String,
+    pub at: Time,
+    pub sn: Option<f64>,
+    pub count: u32,
+}
+
+/// The last FM Ping or Autotune answer: who, S/N they heard us at, and for Autotune the step they named.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Probe {
+    pub call: String,
+    pub at: Time,
+    pub sn: Option<f64>,
+    pub step: Option<u8>,
+}
+
+pub const SESSION_HISTORY: usize = 20;
+pub const HEARD_LIST: usize = 30;
+
+impl Snapshot {
+    /// Remember `call` as heard now; the list keeps the `HEARD_LIST` most recent, newest first.
+    pub fn heard(&mut self, call: &str, what: &str, sn: Option<f64>) {
+        let count = match self.heard_list.iter().position(|h| h.call == call) {
+            Some(i) => self.heard_list.remove(i).count + 1,
+            None => 1,
+        };
+        let h = Heard { call: call.to_string(), what: what.to_string(), at: self.now, sn, count };
+        self.heard_list.insert(0, h);
+        self.heard_list.truncate(HEARD_LIST);
+    }
+
+    pub fn link_up(&mut self, peer: &str) {
+        self.session = Some(Session { peer: peer.to_string(), since: self.now, ..Session::default() });
+    }
+
+    pub fn link_down(&mut self) {
+        let Some(session) = self.session.take() else { return };
+        self.sessions.push(Past { session, until: self.now });
+        let excess = self.sessions.len().saturating_sub(SESSION_HISTORY);
+        self.sessions.drain(..excess);
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Snapshot {
     pub now: Time,
@@ -86,6 +149,12 @@ pub struct Snapshot {
     pub bitrate: Option<Bitrate>,
     pub calls: Vec<String>,
     pub dropped: usize,
+    pub listen: bool,
+    pub session: Option<Session>,
+    /// Finished links, oldest first.
+    pub sessions: Vec<Past>,
+    pub heard_list: Vec<Heard>,
+    pub probe: Option<Probe>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -97,13 +166,26 @@ pub enum Event {
     Control { what: String, ok: bool },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Control {
     Tune(bool),
     Drive(f64),
     Abort,
     Restart,
     Left,
+    Connect {
+        remote: String,
+        vias: Vec<String>,
+    },
+    Disconnect,
+    Listen(bool),
+    Cq,
+    /// FM only: ask `target` how well it hears us; `tune` runs VARA FM's Autotune ramp instead of a single Ping.
+    Probe {
+        target: String,
+        vias: Vec<String>,
+        tune: bool,
+    },
 }
 
 type Controls = Arc<Mutex<VecDeque<(u64, Control)>>>;

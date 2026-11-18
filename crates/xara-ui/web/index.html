@@ -14,13 +14,7 @@
   <div class="brand">xara <span id="mode" class="dim"></span></div>
   <div id="calls" class="calls"></div>
   <a class="navlink" href="/chat" title="keyboard terminal (needs --ui-control and the token)">terminal</a>
-  <select id="theme" class="theme" title="Display theme" aria-label="Display theme">
-    <option value="system">System</option>
-    <option value="sodium">Sodium lamp</option>
-    <option value="nixie">Nixie tube</option>
-    <option value="airport">Airport board</option>
-    <option value="deco">Art deco</option>
-  </select>
+  <select id="theme" class="theme" title="Display theme" aria-label="Display theme"><option value="system">System</option></select>
   <div id="conn" class="conn">connecting</div>
 </header>
 <main>
@@ -36,7 +30,23 @@
       <div class="tile"><label>AFC (Hz)</label><b id="afc">-</b></div>
       <div class="tile"><label>Attempts</label><b id="tries">-</b></div>
       <div class="tile"><label>buffer (bytes)</label><b id="buffer">-</b></div>
+      <div class="tile"><label>Session</label><b id="dur">-</b></div>
+      <div class="tile"><label>Sent</label><b id="sent">-</b></div>
+      <div class="tile"><label>Received</label><b id="recv">-</b></div>
+      <div class="tile"><label>Average</label><b id="avg">-</b><small>bps</small></div>
     </div>
+    <form id="link-controls" class="link-controls" hidden autocomplete="off">
+      <input id="lc-call" placeholder="Callsign" spellcheck="false" aria-label="Callsign to connect to">
+      <input id="lc-via1" placeholder="via" spellcheck="false" aria-label="First digipeater" class="via">
+      <input id="lc-via2" placeholder="via" spellcheck="false" aria-label="Second digipeater" class="via">
+      <button id="lc-connect" class="btn" type="submit">Connect</button>
+      <button id="lc-disconnect" class="btn" type="button">Disconnect</button>
+      <button id="lc-ping" class="btn fm-only" type="button" title="FM Ping: ask the station how well it hears you">Ping</button>
+      <button id="lc-autotune" class="btn fm-only" type="button" title="FM Autotune: ten louder bursts; the station names the drive level">Autotune</button>
+      <button id="lc-cq" class="btn" type="button">CQ</button>
+      <label class="toggle"><input type="checkbox" id="lc-listen"> Listen</label>
+    </form>
+    <p id="probe" class="hint" hidden></p>
   </section>
   <section class="card audio">
     <div class="leds">
@@ -83,6 +93,18 @@
   <section class="card chart">
     <h2>S/N history <span class="dim">last 5 min</span></h2>
     <canvas id="sn-chart" height="160"></canvas>
+  </section>
+  <section class="card heard">
+    <h2>Heard stations</h2>
+    <table class="list"><thead><tr><th>Call</th><th>Sent</th><th>S/N</th><th>Last heard</th><th>#</th><th></th></tr></thead>
+      <tbody id="heard"></tbody></table>
+    <p id="heard-none" class="hint">Nothing heard yet.</p>
+  </section>
+  <section class="card sessions">
+    <h2>Sessions</h2>
+    <table class="list"><thead><tr><th>Station</th><th>Started</th><th>Length</th><th>Sent</th><th>Received</th></tr></thead>
+      <tbody id="sessions"></tbody></table>
+    <p id="sessions-none" class="hint">No links since xara started.</p>
   </section>
   <section class="card log">
     <div class="log-head">

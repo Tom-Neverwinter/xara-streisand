@@ -12,6 +12,7 @@ maintained fork of x0rro/xara after upstream was withdrawn.
 - HF stations set to 2300 / 2750 now answer 500 Hz callers, at 500 Hz
 - `CWID ON/OFF` takes effect (US calls always ID, as before)
 - `MISSING SOUNDCARD` is sent to the client when the audio device fails
+- web UI: link controls (connect with vias, disconnect, listen, CQ), FM Ping and Autotune (xara can now send both; Autotune sets the drive from the answer), session timer / bytes / average speed, a session history, a heard-stations list, and five more themes (green phosphor, radar, synthwave, paper, high contrast)
 - FM: the Autotune reply names a ramp step (byte 34 = step << 2), three above the first step heard; it used to name step 4 × the first step heard, so -6 dB or NO SIGNAL when step 1 was lost; if step 10 is lost it now replies when step 10 was due instead of not at all
 - FM: answers VARA FM's Ping and Autotune, as proven against real VARA FM 4.4.1; `xara-monitor --fm --dump` prints connect, ping and reply records in full
 - FM: answers Pings that come through digipeaters, and `--digi` relays Pings and their Replies, matching real VARA FM 4.4.1 frame for frame
