@@ -52,7 +52,7 @@ fn vara_ping_and_reply() {
 }
 
 /// VARA FM 4.4.1 Autotune between two real stations (wide, lab 2026-11-18): ten AutoTune records with the step
-/// in byte 33 (step 3 here), then a Reply naming step 1 in byte 34's high nibble.
+/// in byte 33 (step 3 here), then a Reply with level 0x10 in byte 34.
 #[test]
 fn vara_autotune() {
     let step3 = hex::decode("224e3043414c4c2000202020202020200020202020202020004e3143414c4c200003000100e200").unwrap();
@@ -61,11 +61,13 @@ fn vara_autotune() {
     assert_eq!((r.kind, r.snr, r.source.as_str(), r.target.as_str()), (Kind::AutoTune, 3, "N0CALL", "N1CALL"));
     assert_eq!(r.to_bytes().unwrap(), step3);
     let p = Record0::parse(&reply).unwrap();
-    assert_eq!((p.kind, p.snr, p.tune_step, p.aes, p.compression), (Kind::Reply, 245, 1, false, 0));
-    assert_eq!(Record0::tune_reply("N1CALL", "N0CALL", true, 245, 1).to_bytes().unwrap(), reply);
-    for step in 0..=10 {
-        let b = Record0::tune_reply("N1CALL", "N0CALL", true, 100, step).to_bytes().unwrap();
-        assert_eq!(Record0::parse(&b).unwrap().tune_step, step);
+    assert_eq!((p.kind, p.snr, p.tune, p.aes, p.compression), (Kind::Reply, 245, 0x10, false, 0));
+    assert_eq!(Record0::tune_reply("N1CALL", "N0CALL", true, 245, 0x10).to_bytes().unwrap(), reply);
+    // VARA's other values (0x0c, 0x18) survive parsing and a digipeater's restamp.
+    for tune in [0x00, 0x0c, 0x10, 0x18, 0xa0] {
+        let b = Record0::tune_reply("N1CALL", "N0CALL", true, 100, tune).to_bytes().unwrap();
+        let r = Record0::parse(&b).unwrap();
+        assert_eq!((r.tune, Record0 { hop: 1, ..r.clone() }.restamp(&b)[34]), (tune, tune));
     }
 }
 

@@ -158,7 +158,7 @@ fn autotune_replies_with_the_first_step_heard() {
         .collect();
     assert_eq!((pending, replies.len()), (1, 1), "{out:?}");
     let r = Record0::parse(&replies[0]).unwrap();
-    assert_eq!((r.kind, r.tune_step, r.target.as_str()), (Kind::Reply, 3, "N0CALL"));
+    assert_eq!((r.kind, r.tune, r.target.as_str()), (Kind::Reply, 0x30, "N0CALL"));
     s.on_tx_done(11 * SECOND);
     assert!(drain(&mut s).iter().any(|o| matches!(o, fm::Output::Host(HostEvent::CancelPending))));
 }

@@ -810,9 +810,10 @@ impl Session {
     }
 
     /// VARA FM's Autotune: the caller sends 10 AutoTune records, each louder than the last (step in byte 33); after the
-    /// tenth the target replies with the first step it heard, and the caller sets its drive level from that.
-    /// shortcut: "first step heard" fits the lab runs (clean loop: VARA answers step 1) but is untested on weak
-    /// signals; and if step 10 is lost no reply goes out. Re-check against VARA over a noisy path.
+    /// tenth the target replies with a level in byte 34, and the caller sets its drive level from that.
+    /// shortcut: xara sends (first step heard) << 4, which is 0x10 on any path that decodes step 1. Real VARA sent
+    /// 0x0c, 0x10 or 0x18 over the same clean loop and the scale is unknown; and if step 10 is lost no reply goes out.
+    /// Upgrade when VARA's choice of byte 34 is mapped (lab: vary the level into the target, read the caller's result).
     fn on_autotune(&mut self, r: &Record0, snr_db: f64) {
         if self.state != State::Listen || self.core.transmitting || r.hop != 0 || r.vias() != 0 {
             return;
@@ -831,7 +832,7 @@ impl Session {
         let first = self.autotune.take().map_or(step, |(_, s)| s);
         let wide = r.wide && self.cfg.bw == FmBandwidth::Wide;
         let snr = snr_byte(snr_db + SNR_OFFSET_DB);
-        let Some(bytes) = Record0::tune_reply(&me, &r.source, wide, snr, first).to_bytes() else { return };
+        let Some(bytes) = Record0::tune_reply(&me, &r.source, wide, snr, first << 4).to_bytes() else { return };
         self.ping_reply = true;
         self.core.transmitting = true;
         self.core.out.push_back(Output::Tx(Tx::Data {
