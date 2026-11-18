@@ -160,6 +160,9 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
 
     --radio                 enable radio mode
     --drive-db D            TX drive (<= 0 dB, default -5)
+    --tx-shift HZ           shift TX audio by HZ, e.g. for satellite Doppler (default 0)
+    --rx-shift HZ           shift RX audio by HZ before decoding (default 0)
+    --doppler FILE          follow a Doppler schedule: lines of UNIX_SECONDS RX_HZ TX_HZ, added to the shifts
     --ptt [see section]     PTT has a lot of options
     --rig-freq HZ           tune the rig to HZ at startup (built-in CAT if --cat, else rigctld)
     --cat KIND:PORT[:BAUD[:ADDR]]  built-in CAT: icom, kenwood, yaesu or yaesu5 (see PTT settings)
