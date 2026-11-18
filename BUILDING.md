@@ -128,7 +128,9 @@ Voicemeeter, …), so a test run can't key a real radio by accident.
 
 ### known gaps
 
-- no service files yet: run it from a console or Task Scheduler.
+- no Windows service: xara needs your audio devices, so it runs as a
+  per-user logon task instead. `dist\windows\xara-task.ps1` registers it
+  (config `%APPDATA%\xara\xara.conf`, log `%APPDATA%\xara\xara.log`).
 - WinMM is the only backend (no WASAPI or ASIO).
 
 ## everything else
