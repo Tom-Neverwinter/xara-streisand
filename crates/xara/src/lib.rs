@@ -36,7 +36,10 @@ pub const FM_SPAN_HZ: u32 = 6000;
 
 #[cfg(target_os = "linux")]
 pub(crate) type Ioctl = libc::Ioctl;
-#[cfg(all(unix, not(target_os = "linux")))]
+// Bionic's ioctl() takes an int request, and its TIOCM* constants are c_int.
+#[cfg(target_os = "android")]
+pub(crate) type Ioctl = libc::c_int;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 pub(crate) type Ioctl = libc::c_ulong;
 
 pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
