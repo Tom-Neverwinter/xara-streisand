@@ -125,8 +125,6 @@ Voicemeeter, …), so a test run can't key a real radio by accident.
 
 ### known gaps
 
-- the web UI runs but cannot save settings (saving is Unix-only for now).
-  pass options on the command line or in `--config FILE`.
 - no service files yet: run it from a console or Task Scheduler.
 - WinMM is the only backend (no WASAPI or ASIO).
 
