@@ -3,6 +3,7 @@ use crate::fm::adapt::{
     Adaptation, HINT_MAX, Heard, SNR_OFFSET_DB, as_level, decide, max_level, payload, queue_hint, queue_hint_text,
     recommend_level, sender_level_after, step_down,
 };
+use crate::fm::digi::snr_in;
 use crate::fm::timing::{
     CODE_GATE, DETECT_HOLD, FQ_WAIT_REPLIES, IDLE_DATA_WAIT, TICK, Timing, caller_connect_window, receiver_sync_window,
     state2_backoff, watchdog,
@@ -781,19 +782,23 @@ impl Session {
         self.say(if self.bw == FmBandwidth::Wide { CONNECT_REPLY_WIDE } else { CONNECT_REPLY_NARROW }, State::AwaitGo);
     }
 
-    /// VARA FM's Ping (route test): a listening station answers a direct Ping for one of its calls with a Reply
-    /// carrying the S/N it heard. Pings through digipeaters are not answered yet.
+    /// VARA FM's Ping (route test): a listening station answers a Ping for one of its calls with a Reply carrying
+    /// the S/N it heard (the weakest hop when it came through digipeaters), sent back along the reversed path.
     fn on_ping(&mut self, r: &Record0, snr_db: f64) {
-        if self.state != State::Listen || self.core.transmitting || r.hop != 0 || r.vias() != 0 {
+        if self.state != State::Listen || self.core.transmitting || usize::from(r.hop) != r.vias() {
             return;
         }
         let Some(me) = self.cfg.host.mycalls.iter().find(|c| c.eq_ignore_ascii_case(&r.target)).cloned() else {
             return;
         };
         let wide = r.wide && self.cfg.bw == FmBandwidth::Wide;
-        let Some(bytes) = Record0::ping_reply(&me, &r.source, wide, snr_byte(snr_db + SNR_OFFSET_DB)).to_bytes() else {
-            return;
+        let back = if r.via2.is_empty() { (r.via1.clone(), String::new()) } else { (r.via2.clone(), r.via1.clone()) };
+        let reply = Record0 {
+            via1: back.0,
+            via2: back.1,
+            ..Record0::ping_reply(&me, &r.source, wide, snr_in(snr_db, r.chain_snr))
         };
+        let Some(bytes) = reply.to_bytes() else { return };
         self.core.host(HostEvent::Pending);
         self.ping_reply = true;
         self.core.transmitting = true;

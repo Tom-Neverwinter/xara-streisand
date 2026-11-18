@@ -96,7 +96,7 @@ fn a_direct_ping_gets_a_reply() {
     s.on_tx_done(SECOND);
     assert!(drain(&mut s).iter().any(|o| matches!(o, fm::Output::Host(HostEvent::CancelPending))));
     assert_eq!(s.state(), fm::State::Listen);
-    // Not ours, or through a digipeater: no answer.
+    // Not ours, or not yet through its digipeater: no answer.
     for other in [
         Record0 { target: "N9XYZ".into(), ..Record0::parse(&ping).unwrap() },
         Record0 { via1: "N2CALL".into(), ..Record0::parse(&ping).unwrap() },
@@ -106,10 +106,27 @@ fn a_direct_ping_gets_a_reply() {
     }
 }
 
+/// A Ping that came through digipeater N9DIG is answered back along the path: the exact Reply real VARA FM 4.4.1
+/// sent in the lab (N0CALL -> N9DIG -> N1CALL, wide, 2026-11-18).
+#[test]
+fn a_digipeated_ping_gets_a_reply_back_through_the_digi() {
+    let mut s = fm::Session::new(fm::Config::new(FmBandwidth::Wide, "N1CALL"));
+    drain(&mut s);
+    s.on_record0(0, &unhex("4a4e3043414c4c20004e3944494720200020202020202020004e3143414c4c2000000001f53c8c"), 40.0);
+    let reply = drain(&mut s)
+        .into_iter()
+        .find_map(|o| if let fm::Output::Tx(fm::Tx::Data { frames, .. }) = o { Some(frames[0].clone()) } else { None })
+        .expect("a reply on the air");
+    assert_eq!(reply, unhex("624e3143414c4c20004e3944494720200020202020202020004e3043414c4c2000f5000100b762"));
+}
+
+fn unhex(h: &str) -> Vec<u8> {
+    (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect()
+}
+
 /// The Ping real VARA FM 4.4.1 sent from N0CALL to N1CALL (wide) in the lab, 2026-11-18.
 fn hex_ping() -> Vec<u8> {
-    let h = "424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d";
-    (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect()
+    unhex("424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d")
 }
 
 /// VARA FM's Autotune: stay quiet through the ten louder-and-louder records, then reply with the first step heard.

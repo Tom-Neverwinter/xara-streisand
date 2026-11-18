@@ -13,6 +13,7 @@ maintained fork of x0rro/xara after upstream was withdrawn.
 - `CWID ON/OFF` takes effect (US calls always ID, as before)
 - `MISSING SOUNDCARD` is sent to the client when the audio device fails
 - FM: answers VARA FM's Ping and Autotune, as proven against real VARA FM 4.4.1; `xara-monitor --fm --dump` prints connect, ping and reply records in full
+- FM: answers Pings that come through digipeaters, and `--digi` relays Pings and their Replies, matching real VARA FM 4.4.1 frame for frame
 - `--tuner-enhancement`: VARA's HF gateway option; callers' first 2 connect requests go unanswered so an ATU can tune
 - `--channel left|right|both`: use one side of a stereo sound card, as VARA's channel setting
 - docs/COMPATIBILITY.md: feature-by-feature chart against the VARA suite, checked by `vara_doc.rs`
