@@ -2,15 +2,22 @@
 
 const BEHIND_S = 5;
 const PAYLOAD_KEEP = 65536;
-const COLORS = Object.fromEntries(["caller", "answerer", "ok", "bad", "unproto"].map((k) =>
-  [k, getComputedStyle(document.documentElement).getPropertyValue(`--k-${k}`).trim()]));
+const readColors = () => {
+  const cs = getComputedStyle(document.documentElement);
+  return Object.fromEntries(["caller", "answerer", "ok", "bad", "unproto"].map((k) =>
+    [k, cs.getPropertyValue(`--k-${k}`).trim()]));
+};
+let COLORS = readColors();
+window.addEventListener("themechange", () => { COLORS = readColors(); });
 const GROUP = {
   ctrl: "ctrl", data: "data", payload: "payload", header: "payload", unproto: "unproto", kiss: "unproto",
   cq: "unproto", learned: "notes", dropped: "notes", link_end: "notes", blind: "notes", summary: "notes",
+  connect: "notes", broadcast: "notes", note: "notes",
 };
 
 const log = new LogView($("log"), 3000, 800);
 const rx = meter("rx");
+const ascii = asciiScope("ascii");
 const GROUPS = ["ctrl", "data", "payload", "unproto", "notes"];
 const groups = new Set(savedGroups());
 let collapse = pref.get("xara-monitor.collapse", "on") !== "off";
@@ -86,7 +93,7 @@ function record(r) {
   } else if (r.t === "unproto") {
     e.key = `u|${r.code}`;
     if (unproto) wf.mark(r.ts, unproto[0], unproto[1], COLORS.unproto);
-  } else if (r.t === "data") {
+  } else if (r.t === "data" && r.frames !== undefined) {
     const ok = r.frames.includes("+");
     if (!ok) e.cls += " bad";
     if (passband) wf.mark(r.ts, passband[0] + r.afc, passband[1] + r.afc, ok ? COLORS.ok : COLORS.bad);
@@ -101,12 +108,13 @@ function status(s) {
   conn.alive();
   wf.clock = s.ts;
   log.setOffset(s.epoch ?? Date.now() / 1000 - s.ts);
-  $("mode").textContent = `HF ${s.bw} Hz`;
+  $("mode").textContent = `${s.mode ?? "HF"} ${s.bw} Hz`;
   $("calls").textContent = s.source + (s.epoch ? ` since ${new Date(s.epoch * 1000).toLocaleTimeString([], { hour12: false })}` : "");
   passband = s.passband;
   unproto = s.unproto;
   wf.setPassband(s.passband[0], s.passband[1]);
   rx(s.rx);
+  ascii.level(s.rx.rms);
   $("clip").classList.toggle("on", s.rx.clip > 0);
   $("behind").classList.toggle("on", s.lag > BEHIND_S);
   $("ended").classList.toggle("on", s.ended);
@@ -127,16 +135,62 @@ function status(s) {
   }
 }
 
+// A small animated ASCII scope: a scrolling sparkline of the RX level, plus the
+// current state. Driven by requestAnimationFrame (so it pauses automatically when
+// the tab is hidden) and throttled to ~11 fps. Respects prefers-reduced-motion:
+// then it draws a static level bar and never animates.
+function asciiScope(id) {
+  const el = $(id);
+  if (!el) return { level() {}, state() {} };
+  const W = 52;
+  const BLK = " ▁▂▃▄▅▆▇█"; // 0..8
+  const buf = new Array(W).fill(0);
+  let cur = FLOOR, live = 0, label = "listening", t = 0, last = 0;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const lvl = (db) => Math.max(0, Math.min(8, Math.round((db - FLOOR) / -FLOOR * 8)));
+  const draw = () => {
+    const idle = performance.now() - live > 1200;
+    const bars = buf.map((x) => BLK[x]).join("");
+    const mark = reduce ? "·" : "▪▫"[(t >> 2) & 1];
+    const db = idle || cur <= FLOOR ? "  --  " : `${cur.toFixed(1)} dB`.padStart(8);
+    el.textContent = `RX │${bars}│ ${db}\n   ${mark} ${label}`;
+  };
+  if (reduce) {
+    return {
+      level(db) { cur = db; if (db > FLOOR + 1) live = performance.now(); buf.fill(lvl(db)); draw(); },
+      state(s) { if (s !== label) { label = s; draw(); } },
+    };
+  }
+  const tick = (ts) => {
+    requestAnimationFrame(tick);
+    if (ts - last < 85) return; // ~11 fps
+    last = ts;
+    t++;
+    const idle = performance.now() - live > 1200;
+    const v = idle ? 1 + (((Math.sin(t / 7) + 1) * 1.4) | 0) : lvl(cur);
+    buf.push(v);
+    buf.shift();
+    draw();
+  };
+  requestAnimationFrame(tick);
+  return {
+    level(db) { cur = db; if (db > FLOOR + 1) live = performance.now(); },
+    state(s) { label = s; },
+  };
+}
+
 function link(l, now) {
   const state = $("state");
   if (!l) {
     state.textContent = "Quiet";
     state.className = "state idle";
+    ascii.state("listening");
     $("since").textContent = "";
     $("bytes-ca").textContent = "-";
     $("bytes-ac").textContent = "-";
     return;
   }
+  ascii.state(`${l.caller ?? "?"} → ${l.answerer ?? "?"}`);
   linkStart = l.start;
   const name = `${l.caller ?? "?"} → ${l.answerer ?? "?"}`;
   linkName = name;

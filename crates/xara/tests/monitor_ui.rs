@@ -1,3 +1,6 @@
+// Exercises the TNC, PTT or web UI, which are Unix-only (see the crate root).
+#![cfg(unix)]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, ExitStatus, Stdio};

@@ -71,6 +71,15 @@ pub struct Station {
 }
 
 impl Station {
+    fn set_width(&mut self, bw: Bandwidth) {
+        if bw != self.rx.bw {
+            self.rx = Receiver::idle(bw);
+            self.rx_base = self.c.now;
+            self.modm = Modulator::new(bw);
+            self.keys = None;
+        }
+    }
+
     pub fn new(cfg: Config, opts: Options) -> Self {
         xara_phy::hf::warm(cfg.bw);
         let bw = cfg.bw;
@@ -362,6 +371,8 @@ impl Modem for Station {
     }
 
     fn apply(&mut self, l: Listen) {
+        // The session answers a caller at the caller's width (a 500 Hz caller on a 2300 station).
+        self.set_width(l.bw);
         if self.c.listen.as_ref().is_none_or(|o| o.levels != l.levels || o.nframes != l.nframes) {
             self.c.reports.push_back(Report::Trace(format!("expect {:?} x{}", l.levels, l.nframes)));
         }
@@ -444,11 +455,7 @@ impl Modem for Station {
         if !self.idle() {
             return false;
         }
-        if cfg.bw != self.rx.bw {
-            self.rx = Receiver::idle(cfg.bw);
-            self.rx_base = self.c.now;
-            self.modm = Modulator::new(cfg.bw);
-        }
+        self.set_width(cfg.bw);
         self.c.cfg = cfg;
         self.reset_session();
         true

@@ -1,3 +1,6 @@
+//! Sans-IO ARQ state machines, compression and broadcast codecs for a VARA-compatible HF/FM modem.
+//!
+//! Nothing here touches sockets or audio: callers feed events in and act on what comes out, which keeps it testable.
 pub mod ax25;
 pub mod b2f;
 pub mod bits;

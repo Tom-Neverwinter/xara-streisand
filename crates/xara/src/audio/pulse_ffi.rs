@@ -16,6 +16,7 @@ type SuccessCb = extern "C" fn(*mut Raw, c_int, *mut c_void);
 
 pub const S16LE: c_int = 3;
 pub const STREAM_DONT_MOVE: c_int = 0x0200;
+pub const STREAM_NO_REMIX_CHANNELS: c_int = 0x0020;
 pub const STREAM_ADJUST_LATENCY: c_int = 0x2000;
 pub const STREAM_INTERPOLATE_TIMING: c_int = 0x0002;
 pub const STREAM_AUTO_TIMING_UPDATE: c_int = 0x0008;
@@ -46,9 +47,18 @@ pub struct BufferAttr {
 }
 
 #[repr(C)]
-struct ChannelMap {
+pub struct ChannelMap {
     _channels: u8,
     _map: [c_int; 32],
+}
+
+impl ChannelMap {
+    /// A one-channel stream at `position` (PA_CHANNEL_POSITION_FRONT_LEFT = 1, FRONT_RIGHT = 2).
+    pub fn mono_at(position: c_int) -> Self {
+        let mut map = [0; 32];
+        map[0] = position;
+        Self { _channels: 1, _map: map }
+    }
 }
 
 #[repr(C)]
@@ -127,7 +137,7 @@ unsafe extern "C" {
     fn pa_operation_unref(o: *mut Raw);
     fn pa_proplist_gets(p: *const Raw, key: *const c_char) -> *const c_char;
     fn pa_proplist_contains(p: *const Raw, key: *const c_char) -> c_int;
-    fn pa_stream_new(c: *mut Raw, name: *const c_char, ss: *const SampleSpec, map: *const Raw) -> *mut Raw;
+    fn pa_stream_new(c: *mut Raw, name: *const c_char, ss: *const SampleSpec, map: *const ChannelMap) -> *mut Raw;
     fn pa_stream_connect_record(s: *mut Raw, dev: *const c_char, attr: *const BufferAttr, flags: c_int) -> c_int;
     fn pa_stream_connect_playback(
         s: *mut Raw,
@@ -307,13 +317,21 @@ struct Collect<T, F> {
 }
 
 extern "C" fn item<T, F: FnMut(&T)>(_: *mut Raw, i: *const T, eol: c_int, userdata: *mut c_void) {
-    // SAFETY: userdata is the Collect that the List owning the operation keeps alive until it is done or cancelled.
-    let c = unsafe { &mut *userdata.cast::<Collect<T, F>>() };
-    if eol < 0 {
-        c.failed = true;
-    } else if eol == 0 && !i.is_null() {
-        // SAFETY: libpulse lends a valid item for the duration of the callback.
-        (c.f)(unsafe { &*i });
+    // A panic in the user closure must not unwind across this extern "C"
+    // boundary — that aborts the process. Contain it; the list is marked failed.
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: userdata is the Collect that the List owning the operation keeps alive until it is done or cancelled.
+        let c = unsafe { &mut *userdata.cast::<Collect<T, F>>() };
+        if eol < 0 {
+            c.failed = true;
+        } else if eol == 0 && !i.is_null() {
+            // SAFETY: libpulse lends a valid item for the duration of the callback.
+            (c.f)(unsafe { &*i });
+        }
+    }));
+    if caught.is_err() {
+        // SAFETY: same Collect; flag the operation as failed so the caller does not trust partial results.
+        unsafe { &mut *userdata.cast::<Collect<T, F>>() }.failed = true;
     }
 }
 
@@ -382,9 +400,10 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub fn new(conn: &Conn, name: &CStr, spec: &SampleSpec) -> Option<Self> {
-        // SAFETY: ctx is live and spec outlives the call; a null map selects the default.
-        let s = NonNull::new(unsafe { pa_stream_new(conn.ctx(), name.as_ptr(), spec, null()) })?;
+    pub fn new(conn: &Conn, name: &CStr, spec: &SampleSpec, map: Option<&ChannelMap>) -> Option<Self> {
+        let map = map.map_or(null(), |m| m as *const ChannelMap);
+        // SAFETY: ctx is live and spec and map outlive the call; a null map selects the default.
+        let s = NonNull::new(unsafe { pa_stream_new(conn.ctx(), name.as_ptr(), spec, map) })?;
         let underflows = NonNull::from(Box::leak(Box::new(Cell::new(0))));
         Some(Self { s, underflows, conn: conn.clone() })
     }

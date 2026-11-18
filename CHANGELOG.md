@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased (xara-streisand)
+
+maintained fork of x0rro/xara after upstream was withdrawn.
+
+- Windows: the TNC runs natively (WinMM audio; serial RTS/DTR, rigctld and VOX PTT; console Ctrl-C), and `xara-monitor` plus its web UI build and run there
+- `xara-monitor --fm narrow|wide`: passive VARA FM decode (connects, CQ, session text), also in the web UI
+- host ports close connections that open with an HTTP request line, so a web page can't drive the TNC
+- CI adds a Windows job
+- full speed by default; `--unregistered` caps the link like unregistered VARA
+- HF stations set to 2300 / 2750 now answer 500 Hz callers, at 500 Hz
+- `CWID ON/OFF` takes effect (US calls always ID, as before)
+- `MISSING SOUNDCARD` is sent to the client when the audio device fails
+- FM: answers VARA FM's Ping and Autotune, as proven against real VARA FM 4.4.1; `xara-monitor --fm --dump` prints connect, ping and reply records in full
+- FM: answers Pings that come through digipeaters, and `--digi` relays Pings and their Replies, matching real VARA FM 4.4.1 frame for frame
+- `--tuner-enhancement`: VARA's HF gateway option; callers' first 2 connect requests go unanswered so an ATU can tune
+- `--channel left|right|both`: use one side of a stereo sound card, as VARA's channel setting
+- docs/COMPATIBILITY.md: feature-by-feature chart against the VARA suite, checked by `vara_doc.rs`
+- docs: platform support table, Windows build notes, contributor guide
+
 ## 0.1.3
 
 - macOS / CoreAudio support thanks to NR5P's work in x0rro/xara#19

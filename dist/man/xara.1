@@ -61,6 +61,12 @@ Pulse sink, ALSA PCM, or CoreAudio device to transmit into (required).
 Without \f[B]\-\-radio\f[R], it must be a Pulse null sink, the ALSA
 \f[B]null\f[R] PCM, or a virtual CoreAudio device such as BlackHole.
 .TP
+\f[B]\-\-channel\f[R] left|right|both
+Which side of a stereo sound card the radio is on, as VARA\[cq]s channel
+setting.
+Default \f[B]both\f[R]: the device is used as mono.
+Not for \f[B]\-\-audio trusdx\f[R].
+.TP
 \f[B]\-\-tx\-buffer\-ms\f[R] \f[I]N\f[R]
 Transmit audio queued ahead of the sound card, in ms.
 30\-500 (default 40).
@@ -163,8 +169,18 @@ Hold PTT for N ms after transmit.
 \f[B]\-\-ptt\-max\-s\f[R] \f[I]N\f[R]
 Release PTT after \f[I]N\f[R] seconds max, 1\-120 (default 30).
 .TP
+\f[B]\-\-unregistered\f[R]
+Cap the link at unregistered VARA speeds (default: full speed)
+.TP
 \f[B]\-\-registered\f[R]
-Enable registered speeds (must set build flag)
+No\-op, kept so old configs still work
+.TP
+\f[B]\-\-offer\-level\f[R] \f[I]N\f[R]
+HF: offer speed level N at link start instead of picking from S/N
+.TP
+\f[B]\-\-tuner\-enhancement\f[R]
+HF gateway: let callers\[cq] first 2 connect requests pass, so an ATU can
+tune
 .TP
 \f[B]\-h\f[R], \f[B]\-\-help\f[R], \f[B]\-V\f[R], \f[B]\-\-version\f[R]
 Print the usage or the version and exit.
@@ -242,4 +258,4 @@ systemd sets it from \f[B]StateDirectory=\f[R].
 \f[B]xara\-monitor\f[R](1), \f[B]rigctld\f[R](1), \f[B]pactl\f[R](1),
 \f[B]aplay\f[R](1)
 .PP
-README.md in the xara source, https://github.com/x0rro/xara
+README.md in the xara source, https://github.com/Tom-Neverwinter/xara-streisand

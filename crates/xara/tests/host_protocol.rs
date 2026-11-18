@@ -1,3 +1,6 @@
+// Exercises the TNC, PTT or web UI, which are Unix-only (see the crate root).
+#![cfg(unix)]
+
 mod common;
 use common::{Client, Lab, ask, check_sequence, events, is_reply, vector};
 use xara::station::Modem;
@@ -62,6 +65,15 @@ fn command_line_framing() {
     assert_eq!(ask(&mut lab, &mut c, b"ABORT\r", 1), ["OK"]);
     assert_eq!(ask(&mut lab, &mut c, b"DISCONNECT\r", 1), ["OK"]);
     assert_eq!(ask(&mut lab, &mut c, b"CLEANTXBUFFER\r", 1), ["CLEANTXBUFFER FAILED "]);
+}
+
+#[test]
+fn cwid_on_off_sets_the_link_config() {
+    let (mut lab, mut c) = solo();
+    for (cmd, want) in [("CWID ON", true), ("CWID OFF", false)] {
+        assert_eq!(ask(&mut lab, &mut c, format!("{cmd}\r").as_bytes(), 1), ["OK"]);
+        assert_eq!(lab.tnc[0].station().config().cwid, want, "{cmd}");
+    }
 }
 
 #[test]

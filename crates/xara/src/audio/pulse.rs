@@ -2,11 +2,11 @@ use std::io;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::pulse_ffi::{
-    BufferAttr, Conn, Peek, RAW_TIMING, S16LE, STREAM_ADJUST_LATENCY, STREAM_AUTO_TIMING_UPDATE, STREAM_DONT_MOVE,
-    STREAM_INTERPOLATE_TIMING, SampleSpec, Stream,
+    BufferAttr, ChannelMap, Conn, Peek, RAW_TIMING, S16LE, STREAM_ADJUST_LATENCY, STREAM_AUTO_TIMING_UPDATE,
+    STREAM_DONT_MOVE, STREAM_INTERPOLATE_TIMING, STREAM_NO_REMIX_CHANNELS, SampleSpec, Stream,
 };
 use super::ratematch::{Queue, TxBuffer};
-use super::{Audio, BLOCK, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only};
+use super::{Audio, BLOCK, Channel, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only};
 
 const SETUP: Duration = Duration::from_secs(5);
 const SPEC: SampleSpec = SampleSpec { format: S16LE, rate: RATE, channels: 1 };
@@ -148,15 +148,15 @@ impl Play {
 }
 
 impl PulseIo {
-    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer) -> io::Result<Self> {
-        Self::connect(capture, Some((playback, radio, tx)))
+    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer, ch: Channel) -> io::Result<Self> {
+        Self::connect(capture, Some((playback, radio, tx)), ch)
     }
 
     pub fn open_capture(capture: &str) -> io::Result<Self> {
-        Self::connect(capture, None)
+        Self::connect(capture, None, Channel::Both)
     }
 
-    fn connect(capture: &str, playback: Option<(&str, bool, TxBuffer)>) -> io::Result<Self> {
+    fn connect(capture: &str, playback: Option<(&str, bool, TxBuffer)>, ch: Channel) -> io::Result<Self> {
         if let Some((name, radio, _)) = playback {
             refuse_default(name, radio)?;
         }
@@ -164,7 +164,10 @@ impl PulseIo {
         if let Some((name, radio, _)) = playback {
             check_playback(&sinks(&conn)?, name, radio)?;
         }
-        let flags = STREAM_DONT_MOVE | STREAM_ADJUST_LATENCY;
+        // One side of a stereo card: a mono stream placed there, with no remixing that would mix in or copy to the other side.
+        let map = ch.index().map(|i| ChannelMap::mono_at(i as i32 + 1));
+        let no_remix = if map.is_some() { STREAM_NO_REMIX_CHANNELS } else { 0 };
+        let flags = STREAM_DONT_MOVE | STREAM_ADJUST_LATENCY | no_remix;
         let attr = BufferAttr {
             maxlength: u32::MAX,
             tlength: u32::MAX,
@@ -172,11 +175,12 @@ impl PulseIo {
             minreq: u32::MAX,
             fragsize: bytes(10),
         };
-        let mut rec = Stream::new(&conn, c"rx", &SPEC).ok_or_else(|| io::Error::other("pulse stream"))?;
+        let mut rec = Stream::new(&conn, c"rx", &SPEC, map.as_ref()).ok_or_else(|| io::Error::other("pulse stream"))?;
         rec.connect_record(capture, &attr, flags | STREAM_INTERPOLATE_TIMING | STREAM_AUTO_TIMING_UPDATE)?;
         let play = match playback {
             Some((name, _, buf)) => {
-                let mut p = Stream::new(&conn, c"tx", &SPEC).ok_or_else(|| io::Error::other("pulse stream"))?;
+                let mut p =
+                    Stream::new(&conn, c"tx", &SPEC, map.as_ref()).ok_or_else(|| io::Error::other("pulse stream"))?;
                 let attr = BufferAttr {
                     maxlength: u32::MAX,
                     tlength: frame_bytes(2 * BLOCK),

@@ -1,0 +1,4 @@
+# Golden transcripts are compared byte for byte (crates/xara-arq/tests/golden/mod.rs).
+# Keep them LF on every checkout, or Windows' core.autocrlf turns them CRLF and
+# the tests fail on line endings alone.
+crates/xara-arq/tests/golden/*.txt text eol=lf

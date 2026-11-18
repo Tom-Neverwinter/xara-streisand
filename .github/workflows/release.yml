@@ -72,3 +72,36 @@ jobs:
           awk -v h="## $ver" '$0 == h { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
             --title "xara $ver" --notes-file notes.md out/*
+
+  # Windows binaries are not byte-reproducible, so they stay out of the tag's SHA256SUMS: built after the
+  # draft release exists, attested on their own and uploaded next to the Linux tarballs with their own sum.
+  windows:
+    needs: [release]
+    runs-on: windows-2022
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: build
+        run: cargo build --locked --release -p xara
+      - name: package
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+          $name = "xara-$ver-x86_64-pc-windows-msvc"
+          New-Item -ItemType Directory -Force "out\$name" | Out-Null
+          Copy-Item target\release\xara.exe, target\release\xara-monitor.exe, LICENSE, README.md, BUILDING.md "out\$name\"
+          Copy-Item -Recurse dist "out\$name\dist"
+          Compress-Archive -Path "out\$name" -DestinationPath "out\$name.zip"
+          $h = (Get-FileHash -Algorithm SHA256 "out\$name.zip").Hash.ToLower()
+          "$h  $name.zip" | Out-File -Encoding ascii "out\$name.zip.sha256"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/*.zip
+      - name: upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release upload $env:GITHUB_REF_NAME (Get-ChildItem out\*.zip, out\*.zip.sha256)

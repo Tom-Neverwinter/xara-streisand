@@ -96,7 +96,7 @@ impl KissServer {
                 let s = match l.accept() {
                     Ok((s, _)) => s,
                     Err(_) => {
-                        thread::sleep(crate::server::ACCEPT_BACKOFF);
+                        thread::sleep(crate::ACCEPT_BACKOFF);
                         continue;
                     }
                 };
@@ -131,7 +131,12 @@ impl KissServer {
 fn read(mut s: TcpStream, id: u64, tx: SyncSender<(u8, Vec<u8>)>, clients: Clients) {
     let mut d = Deframer::default();
     let mut buf = vec![0; 4096];
+    let mut first = true;
     while let Ok(n @ 1..) = s.read(&mut buf) {
+        if std::mem::take(&mut first) && crate::http_request_line(&buf[..n]) {
+            crate::refuse_http("KISS");
+            break;
+        }
         for f in d.feed(&buf[..n]) {
             if tx.send(f).is_err() {
                 return;

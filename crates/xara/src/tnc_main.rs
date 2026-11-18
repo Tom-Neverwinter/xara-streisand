@@ -1,0 +1,1388 @@
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+use xara::audio::ratematch::{self, TxBuffer};
+use xara::audio::txpath::TxPath;
+use xara::audio::{self, Audio, Backend, Behind};
+use xara::cli::{self, UiArgs, Usage, num};
+use xara::ptt::{PttCtl, PttSpec, PttTiming, Rigctld};
+use xara::record::{self, Recorder};
+use xara::say;
+use xara::shift::Shift;
+use xara::signals;
+use xara::station::{self, DEFAULT_DRIVE_DB, Modem, Options};
+use xara::tnc::Tnc;
+use xara_arq::{fm, hf};
+use xara_host::kiss::KissServer;
+use xara_host::server::Host;
+use xara_phy::fm::level::FmBandwidth;
+use xara_phy::hf::level::{Bandwidth, Record};
+use xara_ui::messages::Info;
+use xara_ui::server::{Access, UiServer, new_token, stored_token, valid_token};
+use xara_ui::settings::{self, Device, Devices, Entry, Init, Pairs, Settings};
+use xara_ui::telemetry::{self, EVENT_QUEUE};
+
+const USAGE: Usage = Usage {
+    name: "xara",
+    synopsis: "usage: xara [--config FILE] --call CALL --capture SOURCE\n            \
+               --playback SINK [options]\n       \
+               xara [--config FILE] --list-devices [--audio BACKEND]",
+    tagline: "a VARA-compatible HF/FM modem",
+    sections: &["minimum config", "options", "PTT settings"],
+};
+
+const SECOND_SIGNAL_GRACE: Duration = Duration::from_secs(2);
+const EXIT_RESTART_FAILED: u8 = 75;
+const TOKEN_ENV: &str = "XARA_UI_TOKEN";
+const RECORD_PART_ENV: &str = "XARA_RECORD_PART";
+
+struct Args {
+    audio: Backend,
+    capture: String,
+    playback: String,
+    tx_buffer_ms: Option<u32>,
+    call: String,
+    digi: String,
+    bw: Bandwidth,
+    fm: Option<FmBandwidth>,
+    port: u16,
+    kiss_port: Option<u16>,
+    persistence: f64,
+    addr: String,
+    drive_db: f64,
+    rig_freq: Option<u64>,
+    cat: Option<xara::cat::CatSpec>,
+    tx_shift: f64,
+    rx_shift: f64,
+    doppler: Option<xara::doppler::Schedule>,
+    quiet: bool,
+    ui: UiArgs,
+    ui_control: bool,
+    ui_token: Option<String>,
+    state_dir: Option<String>,
+    registered: bool,
+    offer_level: Option<usize>,
+    tuner: bool,
+    radio: bool,
+    ptt: Option<PttSpec>,
+    timing: PttTiming,
+    trusdx_speaker: bool,
+    channel: audio::Channel,
+    record: Option<PathBuf>,
+    log: Option<PathBuf>,
+    syslog: Option<String>,
+    syslog_name: Option<String>,
+    hf_given: bool,
+    list_devices: bool,
+    setup: bool,
+}
+
+fn finite(k: &str, v: &str) -> Result<f64, String> {
+    let x: f64 = num(k, v)?;
+    if x.is_finite() { Ok(x) } else { Err(format!("{k}: {v} is not a finite number")) }
+}
+
+fn defaults() -> Args {
+    Args {
+        audio: Backend::default(),
+        capture: String::new(),
+        playback: String::new(),
+        tx_buffer_ms: None,
+        call: String::new(),
+        digi: String::new(),
+        bw: Bandwidth::Hz2300,
+        fm: None,
+        port: 8300,
+        kiss_port: Some(xara_host::kiss::DEFAULT_PORT),
+        persistence: xara_arq::hf::broadcast::DEFAULT_PERSISTENCE,
+        addr: xara::DEFAULT_ADDR.into(),
+        drive_db: DEFAULT_DRIVE_DB,
+        rig_freq: None,
+        cat: None,
+        tx_shift: 0.0,
+        rx_shift: 0.0,
+        doppler: None,
+        quiet: false,
+        ui: UiArgs::default(),
+        ui_control: false,
+        ui_token: None,
+        state_dir: None,
+        // Full speed by default; --unregistered caps the link like an unregistered VARA.
+        registered: true,
+        offer_level: None,
+        tuner: false,
+        radio: false,
+        ptt: None,
+        timing: PttTiming::default(),
+        trusdx_speaker: false,
+        channel: audio::Channel::Both,
+        record: None,
+        log: None,
+        syslog: None,
+        syslog_name: None,
+        hf_given: false,
+        list_devices: false,
+        setup: false,
+    }
+}
+
+fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) -> Result<(), String> {
+    if a.ui.take(k, &mut v)? {
+        return Ok(());
+    }
+    match k {
+        "--audio" => a.audio = v()?.parse()?,
+        "--channel" => a.channel = v()?.parse()?,
+        "--capture" => a.capture = v()?,
+        "--playback" => a.playback = v()?,
+        "--tx-buffer-ms" => a.tx_buffer_ms = Some(num(k, &v()?)?),
+        "--call" => a.call = cli::call(&v()?)?,
+        "--digi" => {
+            a.digi = v()?.to_ascii_uppercase();
+            if !xara_arq::cq::valid_call(&a.digi) {
+                return Err(format!("bad digipeater call {}", a.digi));
+            }
+        }
+        "--hf" => {
+            a.bw = v()?.parse()?;
+            a.hf_given = true;
+        }
+        "--fm" => {
+            a.fm = Some(match v()?.to_ascii_lowercase().as_str() {
+                "narrow" => FmBandwidth::Narrow,
+                "wide" => FmBandwidth::Wide,
+                m => return Err(format!("bad FM mode {m}")),
+            })
+        }
+        "--port" => a.port = num(k, &v()?)?,
+        "--kiss-port" => {
+            a.kiss_port = match v()?.as_str() {
+                "off" | "OFF" => None,
+                p => Some(num(k, p)?),
+            }
+        }
+        "--persistence" => a.persistence = finite(k, &v()?)?.clamp(0.0, 1.0),
+        "--addr" => a.addr = v()?,
+        "--drive-db" => a.drive_db = finite(k, &v()?)?,
+        "--rig-freq" => a.rig_freq = Some(num(k, &v()?)?),
+        "--cat" => a.cat = Some(xara::cat::CatSpec::parse(&v()?)?),
+        "--tx-shift" => a.tx_shift = finite(k, &v()?)?,
+        "--rx-shift" => a.rx_shift = finite(k, &v()?)?,
+        "--doppler" => {
+            let f = v()?;
+            let text = std::fs::read_to_string(&f).map_err(|e| format!("--doppler {f}: {e}"))?;
+            a.doppler = Some(xara::doppler::Schedule::parse(&text).map_err(|e| format!("--doppler {f}: {e}"))?);
+        }
+        "--quiet" => a.quiet = true,
+        "--ui-control" => a.ui_control = true,
+        "--ui-token" => {
+            let t = v()?;
+            if !valid_token(&t) {
+                return Err("--ui-token must be 8-128 characters of A-Z, a-z, 0-9, - and _".into());
+            }
+            a.ui_token = Some(t);
+        }
+        "--state-dir" => a.state_dir = Some(v()?),
+        "--radio" => a.radio = true,
+        "--ptt" => a.ptt = Some(PttSpec::parse(&v()?)?),
+        "--ptt-lead-ms" => a.timing.lead = Duration::from_millis(num(k, &v()?)?),
+        "--ptt-tail-ms" => a.timing.tail = Duration::from_millis(num(k, &v()?)?),
+        "--ptt-max-s" => a.timing.max_on = Duration::from_secs(num(k, &v()?)?),
+        #[cfg(feature = "trusdx")]
+        "--trusdx-speaker" => a.trusdx_speaker = true,
+        "--record" => a.record = Some(PathBuf::from(v()?)),
+        "--log" => a.log = Some(PathBuf::from(v()?)),
+        "--syslog" => a.syslog = Some(v()?),
+        "--syslog-name" => a.syslog_name = Some(v()?),
+        "--list-devices" => a.list_devices = true,
+        "--setup" => a.setup = true,
+        // Kept so old command lines and configs still parse; full speed is the default now.
+        "--registered" => a.registered = true,
+        "--unregistered" => a.registered = false,
+        "--offer-level" => a.offer_level = Some(num(k, &v()?)?),
+        "--tuner-enhancement" => a.tuner = true,
+        _ if k == "--trusdx-speaker" => return Err(format!("{k}: xara was built without the trusdx feature")),
+        _ => return Err(format!("unknown option {k}")),
+    }
+    Ok(())
+}
+
+fn parse(argv: &[String]) -> Result<Option<Args>, String> {
+    if let Some(m) = argv.iter().find(|k| cli::is_meta(k)) {
+        cli::meta(m, &USAGE);
+        return Ok(None);
+    }
+    build(argv, &Pairs::new()).map(Some)
+}
+
+fn build(argv: &[String], saved: &Pairs) -> Result<Args, String> {
+    let mut a = defaults();
+    let mut it = argv.iter();
+    while let Some(k) = it.next() {
+        take(&mut a, k, || it.next().cloned().ok_or(format!("{k} needs a value")))?;
+    }
+    for (k, v) in saved {
+        if !settings::KEYS.contains(&k.as_str()) {
+            return Err(format!("unknown setting {k}"));
+        }
+        take(&mut a, &format!("--{k}"), || Ok(v.clone()))?;
+    }
+    if !a.list_devices && !a.setup {
+        check(&a)?;
+    }
+    Ok(a)
+}
+
+fn check(a: &Args) -> Result<(), String> {
+    if a.capture.is_empty() || a.playback.is_empty() {
+        return Err("--capture and --playback are required".into());
+    }
+    if a.call.is_empty() {
+        return Err("--call is required".into());
+    }
+    if a.call.split('-').next().is_some_and(|c| c.eq_ignore_ascii_case("N0CALL")) {
+        return Err("--call: N0CALL is not a callsign".into());
+    }
+    if a.port == u16::MAX {
+        return Err("--port must be below 65535: the data port is --port + 1".into());
+    }
+    if a.ui.port.is_none() && (a.ui_control || a.ui_token.is_some() || !a.ui.hosts.is_empty()) {
+        return Err("--ui-control, --ui-token and --ui-host need --ui-port".into());
+    }
+    if a.ui_token.is_some() && !a.ui_control {
+        return Err("--ui-token needs --ui-control".into());
+    }
+    if a.hf_given && a.fm.is_some() {
+        return Err("--hf and --fm cannot both be given".into());
+    }
+    if !a.digi.is_empty() && a.fm.is_none() {
+        return Err("--digi needs --fm".into());
+    }
+    if a.tx_shift.abs() > xara::shift::MAX_HZ || a.rx_shift.abs() > xara::shift::MAX_HZ {
+        return Err(format!("--tx-shift and --rx-shift must be within +-{} Hz", xara::shift::MAX_HZ));
+    }
+    if a.drive_db > 0.0 {
+        return Err("--drive-db must be <= 0".into());
+    }
+    if a.tx_buffer_ms.is_some_and(|n| !(ratematch::MIN_MS..=ratematch::MAX_MS).contains(&n)) {
+        return Err(format!("--tx-buffer-ms must be {}..{}", ratematch::MIN_MS, ratematch::MAX_MS));
+    }
+    match (a.radio, &a.ptt) {
+        (false, Some(_)) => return Err("--ptt needs --radio".into()),
+        (true, None) => return Err("--radio needs --ptt (use --ptt vox for VOX)".into()),
+        _ => {}
+    }
+    let trusdx = a.audio == Backend::Trusdx;
+    match (trusdx, a.ptt == Some(PttSpec::Trusdx)) {
+        (false, true) => return Err("--ptt trusdx needs --audio trusdx".into()),
+        (true, false) if a.radio => return Err("--audio trusdx keys the radio over CAT: use --ptt trusdx".into()),
+        _ => {}
+    }
+    if trusdx && a.channel != audio::Channel::Both {
+        return Err("--channel does not apply to --audio trusdx".into());
+    }
+    if a.tuner && a.fm.is_some() {
+        return Err("--tuner-enhancement is an HF gateway option".into());
+    }
+    if a.trusdx_speaker && !trusdx {
+        return Err("--trusdx-speaker needs --audio trusdx".into());
+    }
+    if trusdx && a.capture != a.playback {
+        return Err("--audio trusdx: --capture and --playback must be the same serial port".into());
+    }
+    if trusdx && a.tx_buffer_ms.is_some() {
+        return Err("--tx-buffer-ms does not apply to --audio trusdx".into());
+    }
+    if a.timing.lead > Duration::from_secs(1) || a.timing.tail > Duration::from_secs(1) {
+        return Err("--ptt-lead-ms and --ptt-tail-ms must be <= 1000".into());
+    }
+    if a.timing.max_on.is_zero() || a.timing.max_on > Duration::from_secs(120) {
+        return Err("--ptt-max-s must be 1..120".into());
+    }
+    Ok(())
+}
+
+fn config_args(path: &Path) -> Result<Vec<String>, String> {
+    let at = |e: String| format!("{}: {e}", path.display());
+    let text = std::fs::read_to_string(path).map_err(|e| at(e.to_string()))?;
+    let mut probe = defaults();
+    let mut out = Vec::new();
+    for Entry { line, key, value } in settings::entries(&text).map_err(at)? {
+        let at = |e: String| at(format!("line {line}: {e}"));
+        if key == "config" || key == "list-devices" || key == "setup" {
+            return Err(at(format!("{key} cannot be set from a config file")));
+        }
+        let flag = format!("--{key}");
+        let mut wants_value = false;
+        take(&mut probe, &flag, || {
+            wants_value = true;
+            value.clone().ok_or(format!("{key} needs a value"))
+        })
+        .map_err(at)?;
+        match (wants_value, value.as_deref()) {
+            (true, _) => out.extend(std::iter::once(flag).chain(value)),
+            (false, None | Some("yes" | "true" | "on")) => out.push(flag),
+            (false, Some("no" | "false" | "off")) => {}
+            (false, Some(_)) => return Err(at(format!("{key} is a switch: write {key}, or {key} = yes|no"))),
+        }
+    }
+    Ok(out)
+}
+
+fn default_config() -> Option<PathBuf> {
+    config_home().filter(|p| p.exists())
+}
+
+/// `%APPDATA%\xara` on Windows, where the config file and the web UI's settings live by default.
+fn windows_app_dir() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    std::env::var_os("APPDATA").filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("xara"))
+}
+
+/// `argv` less any `--config FILE`.
+fn without_config(argv: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut it = argv.iter();
+    while let Some(k) = it.next() {
+        if k == "--config" {
+            it.next();
+        } else {
+            out.push(k.clone());
+        }
+    }
+    out
+}
+
+fn with_config(argv: &[String]) -> Result<(Option<PathBuf>, Vec<String>), String> {
+    if let Some(m) = argv.iter().find(|k| cli::is_meta(k)) {
+        return Ok((None, vec![m.clone()]));
+    }
+    let (mut path, mut rest) = (None, Vec::new());
+    let mut it = argv.iter();
+    while let Some(k) = it.next() {
+        if k != "--config" {
+            rest.push(k.clone());
+        } else if path.replace(PathBuf::from(it.next().ok_or("--config needs a value")?)).is_some() {
+            return Err("--config given twice".into());
+        }
+    }
+    let Some(path) = path.or_else(default_config) else {
+        return Ok((None, rest));
+    };
+    let mut all = config_args(&path)?;
+    all.extend(rest);
+    Ok((Some(path), all))
+}
+
+/// Tune the rig once at startup: through built-in CAT (--cat, or --ptt cat:...) when given, else rigctld (the
+/// one --ptt rigctld names, or rigctld's default address).
+fn tune(a: &Args, hz: u64) -> std::io::Result<()> {
+    let cat = a.cat.clone().or_else(|| match &a.ptt {
+        Some(PttSpec::Cat(c)) => c.clone(),
+        _ => None,
+    });
+    if let Some(c) = cat {
+        let mut rig = c.open()?;
+        rig.set_frequency(hz)?;
+        say!("rig tuned to {hz} Hz via {}", rig.describe());
+        return Ok(());
+    }
+    let addr = match &a.ptt {
+        Some(PttSpec::Rigctld(r)) => r.clone(),
+        _ => xara::ptt::RIGCTLD_DEFAULT.to_string(),
+    };
+    Rigctld::open(&addr)?.set_frequency(hz)?;
+    say!("rig tuned to {hz} Hz via rigctld at {addr}");
+    Ok(())
+}
+
+fn tx_buffer(a: &Args) -> TxBuffer {
+    TxBuffer::ms(a.tx_buffer_ms.unwrap_or(ratematch::DEFAULT_MS))
+}
+
+fn tail_samples(a: &Args) -> i64 {
+    match a.ptt {
+        None | Some(PttSpec::Vox) => 0,
+        Some(_) => audio::samples(a.timing.tail) as i64,
+    }
+}
+
+fn state_dir(a: &Args) -> Option<PathBuf> {
+    let env = std::env::var("STATE_DIRECTORY").ok();
+    let Some(dir) = a.state_dir.clone().or_else(|| env.and_then(|e| e.split(':').next().map(String::from))) else {
+        return windows_app_dir();
+    };
+    (!dir.is_empty()).then(|| PathBuf::from(dir))
+}
+
+// Windows: the per-user directory's ACLs keep it private; there are no mode bits to check.
+#[cfg(windows)]
+fn make_state_dir(d: &Path) -> Result<Option<String>, String> {
+    std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn make_state_dir(d: &Path) -> Result<Option<String>, String> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let err = |e: std::io::Error| format!("{}: {e}", d.display());
+    if !d.exists() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(d).map_err(err)?;
+        return Ok(None);
+    }
+    let mode = std::fs::metadata(d).map_err(err)?.permissions().mode();
+    Ok((mode & 0o022 != 0).then(|| format!("{} is writable by other users (mode {:o})", d.display(), mode & 0o777)))
+}
+
+fn ui_token(a: &Args, dir: Option<&Path>, inherited: Option<String>) -> std::io::Result<Option<String>> {
+    if !a.ui_control {
+        return Ok(None);
+    }
+    if let Some(t) = a.ui_token.clone().or(inherited) {
+        return Ok(Some(t));
+    }
+    match dir.map(stored_token) {
+        Some(Ok(t)) => Ok(Some(t)),
+        Some(Err(e)) => {
+            say!("UI token not saved ({e}); it changes when xara starts again");
+            new_token().map(Some)
+        }
+        None => new_token().map(Some),
+    }
+}
+
+fn check_saved_playback(a: &Args, saved: &Pairs) -> Result<(), String> {
+    if !saved.iter().any(|(k, _)| k == "playback") {
+        return Ok(());
+    }
+    audio::check_playback(a.audio, &a.playback, a.radio).map_err(|e| e.to_string())
+}
+
+fn with_saved(argv: &[String], saved: &Pairs, fm: bool) -> Result<Args, String> {
+    match (fm, saved.iter().find(|(k, _)| k == "fm" || k == "hf")) {
+        (false, Some((k, _))) if k == "fm" => return Err("HF or FM is chosen on the command line".into()),
+        (true, Some((k, _))) if k == "hf" => return Err("hf is for HF; this station runs FM".into()),
+        _ => {}
+    }
+    let a = build(argv, saved)?;
+    if a.radio && saved.iter().any(|(k, _)| k == "playback") {
+        return Err("with --radio the playback device is chosen on the command line".into());
+    }
+    Ok(a)
+}
+
+fn overridden(base: &Args, a: &Args, saved: &Pairs) {
+    let (was, now) = (effective(base), effective(a));
+    for (k, v) in now.iter().filter(|kv| saved.iter().any(|(s, _)| *s == kv.0) && !was.contains(kv)) {
+        if let Some((_, old)) = was.iter().find(|(w, _)| w == k) {
+            say!("saved setting {k} = {v} overrides {old}");
+        }
+    }
+}
+
+fn effective(a: &Args) -> Pairs {
+    let mode = match a.fm {
+        Some(bw) => ("fm", format!("{bw:?}").to_ascii_lowercase()),
+        None => ("hf", a.bw.hz().to_string()),
+    };
+    [
+        ("call", a.call.clone()),
+        mode,
+        ("drive-db", a.drive_db.to_string()),
+        ("capture", a.capture.clone()),
+        ("playback", a.playback.clone()),
+        ("ptt-lead-ms", a.timing.lead.as_millis().to_string()),
+        ("ptt-tail-ms", a.timing.tail.as_millis().to_string()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect()
+}
+
+fn devices(b: Backend) -> std::io::Result<Devices> {
+    let (capture, playback) = audio::list(b)?;
+    let d = |v: Vec<(String, String)>| v.into_iter().map(|(name, desc)| Device { name, desc }).collect();
+    Ok(Devices { backend: b.name(), capture: d(capture), playback: d(playback) })
+}
+
+fn list_devices(b: Backend) -> Result<ExitCode, String> {
+    let d = devices(b).map_err(|e| format!("listing {} devices: {e}", b.name()))?;
+    let mut out = String::new();
+    for (what, list) in [("capture", d.capture), ("playback", d.playback)] {
+        out += &format!("{} {what}:\n", d.backend);
+        for Device { name, desc } in list {
+            out += &match desc.is_empty() || desc == name {
+                true => format!("  {name}\n"),
+                false => format!("  {name}  ({desc})\n"),
+            };
+        }
+    }
+    print!("{out}");
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `xara --setup`: ask for the few things xara needs and write them to the config file xara reads at
+/// startup (`~/.config/xara/xara.conf`, `%APPDATA%\xara\xara.conf` on Windows).
+fn setup(b: Backend) -> Result<ExitCode, String> {
+    let path = config_home().ok_or("no config directory (set HOME, or XDG_CONFIG_HOME)")?;
+    let d = devices(b).map_err(|e| format!("listing {} devices: {e}", b.name()))?;
+    let stdin = std::io::stdin();
+    let mut out = std::io::stdout();
+    let text = setup_with(&mut stdin.lock(), &mut out, &d, &path)?;
+    if path.exists() && !ask_yes(&mut stdin.lock(), &mut out, &format!("{} exists. replace it?", path.display()))? {
+        println!("nothing written. the settings were:\n\n{text}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, &text).map_err(|e| format!("{}: {e}", path.display()))?;
+    println!("wrote {}. start xara with no options to use it; edit the file for anything else.", path.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Where `--setup` writes and, if it exists, where xara reads its config by default.
+fn config_home() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .map(|b| b.join("xara").join("xara.conf"))
+        .or_else(|| windows_app_dir().map(|d| d.join("xara.conf")))
+}
+
+fn prompt(input: &mut impl std::io::BufRead, out: &mut impl std::io::Write, q: &str) -> Result<String, String> {
+    write!(out, "{q} ").and_then(|_| out.flush()).map_err(|e| e.to_string())?;
+    let mut l = String::new();
+    if input.read_line(&mut l).map_err(|e| e.to_string())? == 0 {
+        return Err("setup cancelled (end of input)".into());
+    }
+    Ok(l.trim().to_string())
+}
+
+fn ask_yes(input: &mut impl std::io::BufRead, out: &mut impl std::io::Write, q: &str) -> Result<bool, String> {
+    Ok(matches!(prompt(input, out, &format!("{q} [y/N]"))?.to_lowercase().as_str(), "y" | "yes"))
+}
+
+/// Pick one of `list` by its number.
+fn pick(
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+    what: &str,
+    list: &[Device],
+) -> Result<String, String> {
+    if list.is_empty() {
+        return Err(format!("no {what} devices found"));
+    }
+    loop {
+        writeln!(out, "\n{what} devices:").map_err(|e| e.to_string())?;
+        for (i, Device { name, desc }) in list.iter().enumerate() {
+            let desc = if desc.is_empty() || desc == name { String::new() } else { format!("  ({desc})") };
+            writeln!(out, "  {}. {name}{desc}", i + 1).map_err(|e| e.to_string())?;
+        }
+        let a = prompt(input, out, &format!("{what} device number:"))?;
+        match a.parse::<usize>() {
+            Ok(n) if (1..=list.len()).contains(&n) => return Ok(list[n - 1].name.clone()),
+            _ => writeln!(out, "pick 1 to {}", list.len()).map_err(|e| e.to_string())?,
+        }
+    }
+}
+
+fn setup_with(
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+    d: &Devices,
+    path: &Path,
+) -> Result<String, String> {
+    writeln!(out, "xara setup: writes {}\n", path.display()).map_err(|e| e.to_string())?;
+    let call = loop {
+        match cli::call(&prompt(input, out, "your callsign:")?.to_uppercase()) {
+            Ok(c) => break c,
+            Err(e) => writeln!(out, "{e}").map_err(|e| e.to_string())?,
+        }
+    };
+    let mode = loop {
+        let a = prompt(input, out, "mode: hf 500 / hf 2300 / hf 2750 / fm narrow / fm wide [hf 2300]:")?;
+        match a.to_lowercase().as_str() {
+            "" | "hf 2300" | "2300" => break "hf = 2300",
+            "hf 500" | "500" => break "hf = 500",
+            "hf 2750" | "2750" => break "hf = 2750",
+            "fm narrow" | "narrow" => break "fm = narrow",
+            "fm wide" | "wide" => break "fm = wide",
+            _ => writeln!(out, "one of: hf 500, hf 2300, hf 2750, fm narrow, fm wide").map_err(|e| e.to_string())?,
+        }
+    };
+    let capture = pick(input, out, "capture (from the radio)", &d.capture)?;
+    let playback = pick(input, out, "playback (to the radio)", &d.playback)?;
+    let mut text = format!(
+        "# written by xara --setup; keys are xara options without the leading --\n\
+         call = {call}\n{mode}\naudio = {}\ncapture = {capture}\nplayback = {playback}\n",
+        d.backend
+    );
+    writeln!(out, "\nPTT: vox, rts:PORT, dtr:PORT, cm108:VID:PID, rigctld, cat:KIND:PORT (see xara --help)")
+        .map_err(|e| e.to_string())?;
+    let ptt = loop {
+        let a = prompt(input, out, "PTT method, or empty for none (receive / virtual cable only):")?;
+        match a.is_empty() || PttSpec::parse(&a).is_ok() {
+            true => break a,
+            false => writeln!(out, "{}", PttSpec::parse(&a).unwrap_err()).map_err(|e| e.to_string())?,
+        }
+    };
+    if !ptt.is_empty() {
+        if ask_yes(input, out, "this keys a real transmitter: enable radio mode?")? {
+            text += &format!("radio = yes\nptt = {ptt}\n");
+        } else {
+            text += &format!("# radio = yes\n# ptt = {ptt}\n");
+        }
+    }
+    Ok(text)
+}
+
+fn persist_drive(dir: &std::path::Path, db: f64) {
+    let r = settings::load(dir).and_then(|saved| {
+        let next = settings::merge(&saved, &vec![("drive-db".to_string(), db.to_string())]);
+        settings::store(dir, &next).map_err(|e| e.to_string())
+    });
+    match r {
+        Ok(()) => say!("drive level {db} dB saved"),
+        Err(e) => say!("drive level not saved: {e}"),
+    }
+}
+
+struct Tick {
+    keyed: bool,
+    tuning: bool,
+    restart: bool,
+}
+
+struct TxState {
+    forced_off: bool,
+    budget: Option<audio::txpath::Budget>,
+}
+
+struct Pumped {
+    audio: std::io::Result<()>,
+    ptt: std::io::Result<()>,
+}
+
+struct Outcome {
+    drive_db: f64,
+    restart: bool,
+    pumped: Pumped,
+}
+
+fn run(
+    a: &Args,
+    mut io: Box<dyn Audio>,
+    settings: Arc<Settings>,
+    stop: &Arc<AtomicBool>,
+    rec: Option<&mut Recorder>,
+) -> std::io::Result<Outcome> {
+    let tx = TxPath::new(audio::samples(a.timing.lead), tx_buffer(a), io.path()?);
+    let b = tx.budget();
+    say!("audio: {b}");
+    let (tx_latency, rx_lag) = with_shifts(a, b.total(), b.lag());
+    let opts = Options { drive_db: a.drive_db, tx_latency, rx_lag, ptt_tail: tail_samples(a) };
+    let host = Host::bind(&a.addr, a.port)?;
+    let mode = match a.fm {
+        Some(bw) => format!("FM {bw:?}"),
+        None => format!("{} Hz", a.bw.hz()),
+    };
+    xara::log::line(
+        true,
+        format_args!(
+            "xara {}: {} {mode}, cmd {} data {}, {} -> {}",
+            env!("CARGO_PKG_VERSION"),
+            a.call,
+            host.cmd_addr,
+            host.data_addr,
+            a.capture,
+            a.playback
+        ),
+    );
+    match a.fm {
+        Some(bw) => {
+            let mut cfg = fm::Config::new(bw, &a.call);
+            cfg.host.registered = a.registered;
+            let mut station = station::fm::Station::new(cfg, opts);
+            station.set_digipeater(&a.digi);
+            if !a.digi.is_empty() {
+                say!("FM digipeater {}", a.digi);
+            }
+            serve(a, io, tx, Tnc::new(station, host), settings, stop, rec)
+        }
+        None => {
+            let mut cfg = hf::Config {
+                offer_level: a.offer_level.map(|n| Record::clamped(n, Record::MAX)),
+                tuner: a.tuner,
+                ..hf::Config::new(a.bw, &a.call)
+            };
+            cfg.host.registered = a.registered;
+            let mut station = station::hf::Station::new(cfg, opts);
+            station.set_persistence(a.persistence);
+            serve(a, io, tx, Tnc::new(station, host), settings, stop, rec)
+        }
+    }
+}
+
+/// The TX latency and RX lag with the frequency shifters' filter delay added: an RX shift makes
+/// capture later, either shift makes the whole TX turnaround longer.
+fn with_shifts(a: &Args, total: i64, lag: i64) -> (i64, i64) {
+    let on = |hz: f64| i64::from(hz != 0.0 || a.doppler.is_some()) * xara::shift::DELAY as i64;
+    let (rx, tx) = (on(a.rx_shift), on(a.tx_shift));
+    (total + rx + tx, lag + rx)
+}
+
+fn serve<M: Modem>(
+    a: &Args,
+    mut io: Box<dyn Audio>,
+    tx: TxPath,
+    mut tnc: Tnc<M>,
+    settings: Arc<Settings>,
+    stop: &Arc<AtomicBool>,
+    rec: Option<&mut Recorder>,
+) -> std::io::Result<Outcome> {
+    let mut kiss = None;
+    if let Some(p) = a.kiss_port {
+        let k = KissServer::bind(&a.addr, p)?;
+        say!("KISS {}", k.addr);
+        kiss = Some(k.addr);
+        tnc.set_kiss(k);
+    }
+    tnc.set_echo(!a.quiet);
+    let _ui = match a.ui.port {
+        Some(p) => {
+            let (t, feed) = telemetry::channel(EVENT_QUEUE);
+            let (mode, span_hz) = if a.fm.is_some() { ("fm", xara::FM_SPAN_HZ) } else { ("hf", xara::HF_SPAN_HZ) };
+            let info = Info { version: env!("CARGO_PKG_VERSION"), mode, span_hz };
+            let token = a.ui_token.clone();
+            let access = Access {
+                control: a.ui_control,
+                token: token.clone(),
+                hosts: a.ui.hosts.clone(),
+                settings: Some(settings),
+                chat: Some(chat_ports(tnc.host().cmd_addr, tnc.host().data_addr, kiss)),
+            };
+            let ui = UiServer::bind(a.ui.addr(), p, feed, info, access)?;
+            say!("UI http://{}/", ui.addr);
+            if let (true, Some(t)) = (a.ui_control, token) {
+                xara::log::console(format_args!(
+                    "UI controls enabled at http://{}/?token={t}: Tune keys the transmitter",
+                    ui.addr
+                ));
+                xara::log::note(format_args!("UI controls enabled: Tune keys the transmitter"));
+            }
+            tnc.set_telemetry(t);
+            Some(ui)
+        }
+        None => None,
+    };
+    let rate = f64::from(xara::audio::RATE);
+    let (mut rx_shift, mut tx_shift) = match &a.doppler {
+        Some(_) => (Some(Shift::tracking(a.rx_shift, rate)), Some(Shift::tracking(a.tx_shift, rate))),
+        None => (Shift::new(a.rx_shift, rate), Shift::new(a.tx_shift, rate)),
+    };
+    let mut shifted = Vec::new();
+    let pumped = pump(a, io.as_mut(), tx, stop, rec, |x, out, s| {
+        if let Some(b) = s.budget {
+            let (t, lag) = with_shifts(a, b.total(), b.lag());
+            tnc.set_tx_latency(t, lag);
+        }
+        if let (Some(d), Some(r), Some(t)) = (&a.doppler, &mut rx_shift, &mut tx_shift) {
+            let (dr, dt) = d.now();
+            r.set_hz(a.rx_shift + dr, rate);
+            t.set_hz(a.tx_shift + dt, rate);
+        }
+        match &mut rx_shift {
+            Some(r) => {
+                shifted.clear();
+                shifted.extend_from_slice(x);
+                r.process(&mut shifted);
+                tnc.process(&shifted, out);
+            }
+            None => tnc.process(x, out),
+        }
+        if let Some(t) = &mut tx_shift {
+            t.process(out);
+        }
+        tnc.force_ptt_off(s.forced_off);
+        Tick { keyed: tnc.keyed(), tuning: tnc.station().tuning(), restart: tnc.restart_requested() }
+    });
+    if pumped.audio.is_err() {
+        tnc.missing_soundcard();
+        // shortcut: a fixed wait for the writer thread to send it before we exit; wait on the queue if it ever gets cut off.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    Ok(Outcome { drive_db: tnc.station().options().drive_db, restart: tnc.restart_requested(), pumped })
+}
+
+/// The TNC's bound host ports as the chat page reaches them (a wildcard bind is reached on loopback).
+fn chat_ports(
+    cmd: std::net::SocketAddr,
+    data: std::net::SocketAddr,
+    kiss: Option<std::net::SocketAddr>,
+) -> xara_ui::chat::HostPorts {
+    let near = |mut s: std::net::SocketAddr| {
+        if s.ip().is_unspecified() {
+            s.set_ip(if s.is_ipv4() {
+                std::net::Ipv4Addr::LOCALHOST.into()
+            } else {
+                std::net::Ipv6Addr::LOCALHOST.into()
+            });
+        }
+        s
+    };
+    xara_ui::chat::HostPorts { cmd: near(cmd), data: near(data), kiss: kiss.map(near) }
+}
+
+fn pump(
+    a: &Args,
+    io: &mut dyn Audio,
+    mut tx: TxPath,
+    stop: &Arc<AtomicBool>,
+    mut rec: Option<&mut Recorder>,
+    mut process: impl FnMut(&[f64], &mut [f64], TxState) -> Tick,
+) -> Pumped {
+    let mut ptt_result = Ok(());
+    let mut ptt = match &a.ptt {
+        Some(spec) => {
+            let dev = match spec {
+                PttSpec::Trusdx => io.ptt().ok_or_else(|| std::io::Error::other("--ptt trusdx needs --audio trusdx")),
+                s => s.open(),
+            };
+            let dev = match dev {
+                Ok(d) => d,
+                Err(e) => return Pumped { audio: Ok(()), ptt: Err(e) },
+            };
+            say!(
+                "RADIO MODE: transmitting into {:?}, PTT {}, lead {} ms, tail {:?}, watchdog {:?}",
+                a.playback,
+                dev.describe(),
+                a.timing.lead.as_millis(),
+                a.timing.tail,
+                a.timing.max_on
+            );
+            Some(PttCtl::spawn(dev, a.timing, stop.clone()))
+        }
+        None => None,
+    };
+    let mut behind = Behind::new();
+    let (mut x, mut out) = (vec![0.0; audio::BLOCK], vec![0.0; audio::BLOCK]);
+    let (mut rx, mut sent) = (vec![0i16; audio::BLOCK], vec![0i16; audio::BLOCK]);
+    let mut budget = None;
+    let audio = (|| {
+        tx.start(io)?;
+        while !stop.load(Ordering::SeqCst) {
+            let reading = Instant::now();
+            io.read(&mut rx)?;
+            let waited = reading.elapsed();
+            let backlog = io.backlog()?;
+            behind.tick(backlog);
+            x.iter_mut().zip(&rx).for_each(|(v, &s)| *v = audio::sample(s));
+            let forced_off = ptt.as_ref().is_some_and(PttCtl::forced_off);
+            let Tick { keyed, tuning, restart } = process(&x, &mut out, TxState { forced_off, budget: budget.take() });
+            if keyed {
+                if let Err(e) = ptt.as_mut().map_or(Ok(()), |p| p.set(true)) {
+                    ptt_result = Err(e);
+                    break;
+                }
+            }
+            let forced = ptt.as_ref().is_some_and(PttCtl::forced_off);
+            budget = tx.send(io, &mut out, forced, waited, backlog)?;
+            if let Some(r) = rec.as_deref_mut() {
+                sent.iter_mut().zip(&out).for_each(|(s, &v)| *s = audio::quantize(v));
+                r.push(&rx, &sent, record::ptt(keyed, forced, tuning));
+            }
+            if !keyed {
+                if let Err(e) = ptt.as_mut().map_or(Ok(()), |p| p.set(false)) {
+                    ptt_result = Err(e);
+                    break;
+                }
+            }
+            if restart {
+                break;
+            }
+        }
+        Ok(())
+    })();
+    if let Some(mut p) = ptt {
+        let done = p.finish();
+        if ptt_result.is_ok() {
+            ptt_result = done;
+        }
+    }
+    Pumped { audio, ptt: ptt_result }
+}
+
+fn open_audio(
+    argv: &[String],
+    a: Args,
+    applied: Option<&Pairs>,
+    error: &mut Option<String>,
+) -> Result<(Args, Box<dyn Audio>), std::io::Error> {
+    let devices = |k: &str| k == "capture" || k == "playback";
+    let open =
+        |a: &Args| audio::open(a.audio, &a.capture, &a.playback, a.radio, tx_buffer(a), a.trusdx_speaker, a.channel);
+    match open(&a) {
+        Ok(io) => Ok((a, io)),
+        Err(e) if applied.is_some_and(|s| s.iter().any(|(k, _)| devices(k))) => {
+            say!("saved audio devices failed ({e}); using the command line's");
+            *error = Some(format!("saved audio devices failed: {e}"));
+            let rest: Pairs = applied.into_iter().flatten().filter(|(k, _)| !devices(k)).cloned().collect();
+            let base = with_saved(argv, &rest, a.fm.is_some()).map_err(std::io::Error::other)?;
+            let io = open(&base)?;
+            Ok((base, io))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn restart(argv: &[String], token: Option<&str>, record_part: Option<u32>) -> ExitCode {
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
+    say!("restarting");
+    let err = match std::env::current_exe() {
+        Ok(exe) => {
+            let mut c = std::process::Command::new(exe);
+            if let Some(t) = token {
+                c.env(TOKEN_ENV, t);
+            }
+            if let Some(n) = record_part {
+                c.env(RECORD_PART_ENV, n.to_string());
+            }
+            #[cfg(unix)]
+            if let Some(a0) = std::env::args_os().next() {
+                c.arg0(a0);
+            }
+            #[cfg(unix)]
+            let e = c.args(argv).exec();
+            // Windows has no exec: run the new instance and hand on its exit status.
+            #[cfg(windows)]
+            let e = match c.args(argv).status() {
+                Ok(s) => return ExitCode::from(s.code().unwrap_or(1) as u8),
+                Err(e) => e,
+            };
+            e
+        }
+        Err(e) => e,
+    };
+    say!("restart failed: {err}");
+    ExitCode::from(EXIT_RESTART_FAILED)
+}
+
+fn main() -> ExitCode {
+    real_main().unwrap_or_else(|e| {
+        say!("{e}");
+        ExitCode::FAILURE
+    })
+}
+
+fn real_main() -> Result<ExitCode, String> {
+    let inherited = std::env::var(TOKEN_ENV).ok().filter(|t| valid_token(t));
+    let part: u32 = std::env::var(RECORD_PART_ENV).ok().and_then(|p| p.parse().ok()).unwrap_or(0);
+    // SAFETY: no other thread has started yet, so nothing reads the environment concurrently.
+    unsafe {
+        std::env::remove_var(TOKEN_ENV);
+        std::env::remove_var(RECORD_PART_ENV);
+    }
+    let cmdline: Vec<String> = std::env::args().skip(1).collect();
+    let (config, argv) = match with_config(&cmdline) {
+        Ok(c) => c,
+        // --setup is how a broken config gets replaced, so it must not need a readable one
+        Err(e) if cmdline.iter().any(|a| a == "--setup") => {
+            eprintln!("{e} (ignored: --setup writes a new one)");
+            (None, without_config(&cmdline))
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            return Ok(ExitCode::from(2));
+        }
+    };
+    let base = match cli::args(parse(&argv), &USAGE) {
+        Ok(a) => a,
+        Err(c) => return Ok(c),
+    };
+    if base.list_devices {
+        return list_devices(base.audio);
+    }
+    if base.setup {
+        return setup(base.audio);
+    }
+    xara::log::init("xara", base.quiet);
+    if let Some(p) = &base.log {
+        xara::log::open(p).map_err(|e| format!("--log {}: {e}", p.display()))?;
+    }
+    let mut base = base;
+    if base.ptt == Some(PttSpec::Cat(None)) {
+        let c = base.cat.clone().ok_or("--ptt cat needs --cat KIND:PORT[:BAUD[:ADDR]] (or --ptt cat:KIND:PORT...)")?;
+        base.ptt = Some(PttSpec::Cat(Some(c)));
+    }
+    if let Some(hz) = base.rig_freq {
+        tune(&base, hz).map_err(|e| format!("--rig-freq {hz}: {e}"))?;
+    }
+    if let Some(to) = &base.syslog {
+        let station = base.syslog_name.clone().unwrap_or_else(|| base.call.clone());
+        xara::log::syslog(to, &station).map_err(|e| format!("--syslog {to}: {e}"))?;
+    }
+    if let Some(p) = &config {
+        say!("config {}", p.display());
+    }
+    let dir = state_dir(&base);
+    let mut error = None;
+    let saved = match &dir {
+        Some(d) => make_state_dir(d)
+            .map(|w| {
+                if let Some(w) = w {
+                    say!("warning: {w}");
+                }
+            })
+            .and_then(|()| settings::load(d))
+            .unwrap_or_else(|e| {
+                error = Some(e);
+                Pairs::new()
+            }),
+        None => Pairs::new(),
+    };
+    let fm = base.fm.is_some();
+    let (a, applied) = match saved.is_empty() {
+        true => (base, false),
+        false => match with_saved(&argv, &saved, fm) {
+            Ok(a) => {
+                overridden(&base, &a, &saved);
+                (a, true)
+            }
+            Err(e) => {
+                error = Some(format!("saved settings ignored: {e}"));
+                (base, false)
+            }
+        },
+    };
+    if let Some(e) = &error {
+        say!("{e}");
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    let sigs = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
+    #[cfg(windows)]
+    let sigs = [];
+    let signaled = signals::trap(&sigs, stop.clone(), || {
+        xara::ptt::wait_released(SECOND_SIGNAL_GRACE);
+    })
+    .map_err(|e| format!("signals: {e}"))?;
+    let (mut a, io) = open_audio(&argv, a, applied.then_some(&saved), &mut error).map_err(|e| e.to_string())?;
+    if let Some(d) = &dir {
+        say!("settings in {}", d.join(settings::FILE).display());
+    }
+    a.ui_token = ui_token(&a, dir.as_deref(), inherited).map_err(|e| format!("UI token: {e}"))?;
+    let (backend, check) = (a.audio, argv.clone());
+    let settings = Arc::new(Settings::new(Init {
+        dir: dir.clone(),
+        values: effective(&a),
+        saved,
+        error,
+        validate: Box::new(move |kv| with_saved(&check, kv, fm).and_then(|a| check_saved_playback(&a, kv))),
+        list: Box::new(move || devices(backend)),
+    }));
+    let mut rec = match &a.record {
+        Some(p) => {
+            let p = record::part(p, part);
+            let mode = match a.fm {
+                Some(bw) => format!("FM {bw:?}"),
+                None => format!("HF {}", a.bw.hz()),
+            };
+            let r = Recorder::open(&p, &mode).map_err(|e| format!("--record {}: {e}", p.display()))?;
+            say!("recording rx, tx and PTT to {}", p.display());
+            Some(r)
+        }
+        None => None,
+    };
+    let o = run(&a, io, settings, &stop, rec.as_mut()).unwrap_or_else(|e| Outcome {
+        drive_db: a.drive_db,
+        restart: false,
+        pumped: Pumped { audio: Err(e), ptt: Ok(()) },
+    });
+    drop(rec);
+    let Pumped { audio, ptt } = o.pumped;
+    if let (Some(d), Ok(())) = (&dir, &audio) {
+        if o.drive_db != a.drive_db {
+            persist_drive(d, o.drive_db);
+        }
+    }
+    if let Err(e) = &ptt {
+        say!("{e}");
+    }
+    if xara::ptt::panicked() {
+        say!("stopped after a panic");
+        return Ok(ExitCode::from(101));
+    }
+    if ptt.is_err() {
+        return Ok(ExitCode::FAILURE);
+    }
+    if signaled.load(Ordering::SeqCst) {
+        return Ok(ExitCode::from(130));
+    }
+    audio.map_err(|e| e.to_string())?;
+    match o.restart {
+        true => Ok(restart(&cmdline, a.ui_token.as_deref(), a.record.as_ref().map(|_| part + 1))),
+        false => Ok(ExitCode::SUCCESS),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(s: &str) -> Vec<String> {
+        s.split_whitespace().map(String::from).collect()
+    }
+
+    fn kv(p: &[(&str, &str)]) -> Pairs {
+        p.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn saved_settings_cannot_move_radio_playback() {
+        let radio = argv("--call N2CALL --capture c --playback radio_pcm --radio --ptt vox");
+        assert!(with_saved(&radio, &kv(&[("playback", "other_card")]), false).is_err_and(|e| e.contains("--radio")));
+        let a = with_saved(&radio, &kv(&[("call", "N1CALL"), ("capture", "c2")]), false).unwrap();
+        assert_eq!((a.call.as_str(), a.capture.as_str(), a.playback.as_str()), ("N1CALL", "c2", "radio_pcm"));
+        let null = argv("--call N2CALL --capture c --playback xara_tx");
+        assert_eq!(with_saved(&null, &kv(&[("playback", "other_tx")]), false).unwrap().playback, "other_tx");
+        assert!(!with_saved(&null, &kv(&[("playback", "--radio")]), false).unwrap().radio);
+        assert!(with_saved(&null, &kv(&[("radio", "")]), false).is_err_and(|e| e.contains("unknown setting")));
+        assert!(with_saved(&null, &kv(&[("ptt", "vox")]), false).is_err_and(|e| e.contains("unknown setting")));
+    }
+
+    #[test]
+    fn saved_values_are_values_not_options() {
+        let null = argv("--call N2CALL --capture c --playback xara_tx");
+        assert_eq!(with_saved(&null, &kv(&[("capture", "-h")]), false).unwrap().capture, "-h");
+        assert!(with_saved(&null, &kv(&[("call", "--help")]), false).is_err_and(|e| e.contains("bad call")));
+        assert!(with_saved(&argv("--call N2CALL --capture c --playback p -h"), &Pairs::new(), false).is_err());
+    }
+
+    #[test]
+    fn a_real_call_is_required() {
+        assert_eq!(parse(&argv("--capture c --playback p")).err().as_deref(), Some("--call is required"));
+        for c in ["N0CALL", "n0call", "N0CALL-7"] {
+            let e = parse(&argv(&format!("--call {c} --capture c --playback p"))).err();
+            assert!(e.is_some_and(|e| e.contains("N0CALL is not a callsign")), "{c}");
+        }
+        let a = argv("--call N2CALL --capture c --playback p");
+        assert!(with_saved(&a, &kv(&[("call", "N0CALL")]), false).is_err_and(|e| e.contains("N0CALL")));
+        assert_eq!(parse(&a).unwrap().unwrap().call, "N2CALL");
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("xara-main-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn conf(name: &str, text: &str) -> PathBuf {
+        let d = scratch(name);
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("xara.conf");
+        std::fs::write(&p, text).unwrap();
+        p
+    }
+
+    #[test]
+    fn config_lines_become_options_the_command_line_overrides() {
+        let p = conf(
+            "conf-ok",
+            "# station\ncall = N1CALL\n\ncapture = plughw:CARD=Device,DEV=0\nplayback=null\nradio\nptt = vox\n\
+             quiet = no\nui-port = 8080\nui-host = a.lan\nui-host = b.lan\nui-control = yes\n",
+        );
+        let want = "--call N1CALL --capture plughw:CARD=Device,DEV=0 --playback null --radio --ptt vox \
+                    --ui-port 8080 --ui-host a.lan --ui-host b.lan --ui-control";
+        assert_eq!(config_args(&p).unwrap(), argv(want));
+        let (path, all) = with_config(&argv(&format!("--call N2CALL --config {}", p.display()))).unwrap();
+        assert_eq!(path.as_deref(), Some(p.as_path()));
+        let a = parse(&all).unwrap().unwrap();
+        assert_eq!((a.call.as_str(), a.radio, a.quiet, a.ui.port), ("N2CALL", true, false, Some(8080)));
+        assert_eq!(a.ui.hosts, ["a.lan", "b.lan"]);
+        std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn setup_asks_and_writes_a_config() {
+        let dev = |n: &str| Device { name: n.into(), desc: String::new() };
+        let d =
+            Devices { backend: "winmm", capture: vec![dev("Mic"), dev("Line In")], playback: vec![dev("Speakers")] };
+        let answers = "bad call!\nn0xra\nfm wide\n9\n2\n1\nrigctld\ny\n";
+        let text = setup_with(&mut answers.as_bytes(), &mut Vec::new(), &d, Path::new("x.conf")).unwrap();
+        assert_eq!(
+            text,
+            "# written by xara --setup; keys are xara options without the leading --\ncall = N0XRA\nfm = wide\n\
+             audio = winmm\ncapture = Line In\nplayback = Speakers\nradio = yes\nptt = rigctld\n"
+        );
+        let text = setup_with(&mut "N0XRA\n\n1\n1\n\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).unwrap();
+        assert!(text.contains("hf = 2300\n") && !text.contains("radio"));
+        assert!(setup_with(&mut "N0XRA\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).is_err());
+        let v = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(without_config(&v("--setup --config bad.conf --audio pulse")), v("--setup --audio pulse"));
+    }
+
+    #[test]
+    fn full_speed_by_default_and_unregistered_opts_out() {
+        let speed = |s: &str| parse(&argv(&format!("{s} --capture c --playback xara_tx"))).unwrap().unwrap().registered;
+        assert!(speed("--call N2CALL"));
+        assert!(speed("--call N2CALL --registered"));
+        assert!(!speed("--call N2CALL --unregistered"));
+    }
+
+    #[test]
+    fn list_devices_needs_no_call_and_takes_audio_from_a_config() {
+        let a = parse(&argv("--list-devices")).unwrap().unwrap();
+        assert!(a.list_devices);
+        assert_eq!(a.audio, Backend::default());
+        assert!(
+            parse(&argv("--list-devices --audio jack"))
+                .is_err_and(|e| e.contains(&format!("expected {}", Backend::default().name())))
+        );
+        for b in [Backend::Pulse, Backend::Alsa].into_iter().filter(|b| b.built()) {
+            let p = conf("conf-list", &format!("call = N1CALL\naudio = {}\n", b.name()));
+            let (_, all) = with_config(&argv(&format!("--config {} --list-devices", p.display()))).unwrap();
+            let a = parse(&all).unwrap().unwrap();
+            assert_eq!((a.list_devices, a.audio), (true, b));
+            std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn trusdx_options_are_checked_together() {
+        let b = |s: &str| build(&argv(&format!("--call N2CALL {s}")), &Pairs::new());
+        let err = |s: &str, want: &str| assert!(b(s).is_err_and(|e| e.contains(want)), "{s}: {:?}", b(s).err());
+        if !Backend::Trusdx.built() {
+            return err("--capture a --playback a --trusdx-speaker", "built without the trusdx feature");
+        }
+        err("--audio trusdx --capture /dev/a --playback /dev/a --radio --ptt vox", "use --ptt trusdx");
+        err("--capture a --playback a --radio --ptt trusdx", "--ptt trusdx needs --audio trusdx");
+        err("--capture a --playback a --trusdx-speaker", "--trusdx-speaker needs --audio trusdx");
+        err("--audio trusdx --capture /dev/a --playback /dev/b", "must be the same serial port");
+        let one = argv("--call N2CALL --audio trusdx --capture /dev/a --playback /dev/a");
+        let moved = with_saved(&one, &kv(&[("capture", "/dev/b")]), false);
+        assert!(moved.is_err_and(|e| e.contains("must be the same serial port")));
+        err("--audio trusdx --capture /dev/a --playback /dev/a --tx-buffer-ms 100", "does not apply to --audio trusdx");
+        b("--audio trusdx --capture /dev/a --playback /dev/a --radio --ptt trusdx --trusdx-speaker").unwrap();
+    }
+
+    #[test]
+    fn tx_buffer_sizes_the_queue_from_the_command_line_or_a_config() {
+        let a = parse(&argv("--call N2CALL --capture c --playback p")).unwrap().unwrap();
+        assert_eq!(tx_buffer(&a), TxBuffer { target: 1920 });
+        let a = parse(&argv("--call N2CALL --capture c --playback p --tx-buffer-ms 100")).unwrap().unwrap();
+        assert_eq!((tx_buffer(&a).target, tx_buffer(&a).capacity()), (4800, 19200));
+        let p = conf("conf-tx-buffer", "tx-buffer-ms = 60\n");
+        assert_eq!(config_args(&p).unwrap(), argv("--tx-buffer-ms 60"));
+        std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn record_takes_a_path_from_the_command_line_or_a_config() {
+        let a = parse(&argv("--call N2CALL --capture c --playback p --record /tmp/x.wav")).unwrap().unwrap();
+        assert_eq!(a.record.as_deref(), Some(Path::new("/tmp/x.wav")));
+        assert!(parse(&argv("--call N2CALL --capture c --playback p --record")).is_err());
+        let p = conf("conf-record", "record = cap.flac\n");
+        assert_eq!(config_args(&p).unwrap(), argv("--record cap.flac"));
+        std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn log_takes_a_path_from_the_command_line_or_a_config() {
+        let a = parse(&argv("--call N2CALL --capture c --playback p --log xara.log")).unwrap().unwrap();
+        assert_eq!(a.log.as_deref(), Some(Path::new("xara.log")));
+        assert!(parse(&argv("--call N2CALL --capture c --playback p --log")).is_err());
+        let p = conf("conf-log", "log = /var/log/xara.log\n");
+        assert_eq!(config_args(&p).unwrap(), argv("--log /var/log/xara.log"));
+        std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn config_errors_name_the_file_and_line() {
+        for (text, want) in [
+            ("call = N0CALL\ncolour = red\n", "line 2: unknown option --colour"),
+            ("call\n", "line 1: call needs a value"),
+            ("radio = maybe\n", "line 1: radio is a switch"),
+            ("drive-db = loud\n", "line 1: --drive-db:"),
+            ("config = other.conf\n", "line 1: config cannot be set"),
+            ("list-devices\n", "line 1: list-devices cannot be set"),
+            ("setup\n", "line 1: setup cannot be set"),
+            ("call N0CALL\n", "line 1: expected key = value"),
+        ] {
+            let p = conf("conf-bad", text);
+            let e = config_args(&p).unwrap_err();
+            assert!(e.starts_with(&format!("{}: {want}", p.display())), "{text:?}: {e}");
+        }
+        scratch("conf-bad");
+        assert!(with_config(&argv("--config /nonexistent/xara.conf")).is_err_and(|e| e.contains("/nonexistent")));
+        assert_eq!(with_config(&argv("--config a --config b")), Err("--config given twice".into()));
+        assert_eq!(with_config(&argv("--config /nonexistent/xara.conf -h")), Ok((None, argv("-h"))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_dir_is_created_private_and_a_shared_one_warned_about() {
+        use std::os::unix::fs::PermissionsExt;
+        let top = scratch("state");
+        let d = top.join("a/b");
+        assert_eq!(make_state_dir(&d), Ok(None));
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode(&d), mode(&top.join("a"))), (0o700, 0o700));
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(make_state_dir(&d), Ok(None));
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(make_state_dir(&d).unwrap().is_some_and(|w| w.contains("775")));
+        assert_eq!(mode(&d), 0o775);
+        std::fs::remove_dir_all(&top).unwrap();
+    }
+
+    #[test]
+    fn controls_always_get_a_token() {
+        let base = "--call N2CALL --capture c --playback p --ui-port 8080 --ui-control";
+        let a = parse(&argv(base)).unwrap().unwrap();
+        let t = ui_token(&a, None, None).unwrap().unwrap();
+        assert!(valid_token(&t) && ui_token(&a, None, None).unwrap() != Some(t));
+        assert_eq!(ui_token(&a, None, Some("from-restart-1".into())).unwrap().as_deref(), Some("from-restart-1"));
+        let given = parse(&argv(&format!("{base} --ui-token given-token-1"))).unwrap().unwrap();
+        assert_eq!(ui_token(&given, None, Some("x".repeat(9))).unwrap().as_deref(), Some("given-token-1"));
+        let dir = scratch("token");
+        make_state_dir(&dir).unwrap();
+        let kept = ui_token(&a, Some(&dir), None).unwrap();
+        assert!(kept.is_some() && ui_token(&a, Some(&dir), None).unwrap() == kept);
+        let view = parse(&argv("--call N2CALL --capture c --playback p --ui-port 8080")).unwrap().unwrap();
+        assert_eq!(ui_token(&view, Some(&dir), None).unwrap(), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(alsa)]
+    #[test]
+    fn a_save_is_refused_when_startup_would_refuse_its_playback() {
+        let null = argv("--call N2CALL --audio alsa --capture null --playback null");
+        let validate = |p: &Pairs| with_saved(&null, p, false).and_then(|a| check_saved_playback(&a, p));
+        for bad in ["hw:1,0", "plughw:CARD=Device,DEV=0", "default", "pulse"] {
+            assert!(validate(&kv(&[("playback", bad)])).is_err_and(|e| e.contains("--radio")), "{bad}");
+        }
+        let pipe = validate(&kv(&[("playback", "file:'|touch /nonexistent/x'")]));
+        assert!(pipe.is_err_and(|e| e.contains("runs a command")));
+        assert_eq!(validate(&kv(&[("playback", "null"), ("call", "N1CALL")])), Ok(()));
+        assert_eq!(validate(&kv(&[("capture", "hw:1,0")])), Ok(()));
+    }
+
+    #[cfg(alsa)]
+    #[test]
+    fn a_refused_saved_device_keeps_the_other_saved_values() {
+        let null = argv("--call N2CALL --audio alsa --capture null --playback null --drive-db -5");
+        let saved = kv(&[("call", "N1CALL"), ("drive-db", "-12"), ("playback", "hw:1,0")]);
+        let a = with_saved(&null, &saved, false).unwrap();
+        let mut error = None;
+        let (a, _io) = open_audio(&null, a, Some(&saved), &mut error).unwrap();
+        assert_eq!((a.call.as_str(), a.drive_db, a.playback.as_str()), ("N1CALL", -12.0, "null"));
+        assert!(error.is_some_and(|e| e.contains("saved audio devices failed")));
+    }
+}

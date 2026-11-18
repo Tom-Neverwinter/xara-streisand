@@ -27,6 +27,7 @@ pub enum Response {
     UnencryptedLink,
     Tune(f64),
     CleanTxBuffer { empty: bool },
+    MissingSoundcard,
     Version(&'static str),
     Line(String),
 }
@@ -90,6 +91,7 @@ impl fmt::Display for Response {
             Response::Tune(d) => write!(f, "TUNE {d}"),
             Response::CleanTxBuffer { empty: true } => f.write_str("CLEANTXBUFFER BUFFEREMPTY"),
             Response::CleanTxBuffer { empty: false } => f.write_str("CLEANTXBUFFER FAILED "),
+            Response::MissingSoundcard => f.write_str("MISSING SOUNDCARD"),
             Response::Version(v) => f.write_str(v),
             Response::Line(l) => f.write_str(&printable(l)),
         }
