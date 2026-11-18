@@ -120,8 +120,7 @@ Voicemeeter, …), so a test run can't key a real radio by accident.
 - serial RTS/DTR: `--ptt rts:COM3` (ports above COM9 also work as `\.\COM12`)
 - hamlib: run `rigctld` and use `--ptt rigctld[:HOST:PORT]`
 - `--ptt vox`
-- cm108/cm119 HID PTT (AIOC, Digirig Lite…) is not supported on Windows yet.
-  use a serial PTT, rigctld, or the rig's VOX.
+- cm108/cm119 HID PTT (AIOC, Digirig Lite…) by USB id: `--ptt cm108:VID:PID[:GPIO]`
 
 ### known gaps
 

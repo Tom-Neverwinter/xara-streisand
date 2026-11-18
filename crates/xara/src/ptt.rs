@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 use crate::Ioctl;
 #[cfg(target_os = "macos")]
 use crate::hid::cm108_usb;
+#[cfg(windows)]
+use crate::hid_win::cm108_usb;
 #[cfg(unix)]
 pub use crate::hidraw::is_hidraw;
 #[cfg(windows)]
@@ -51,6 +53,9 @@ pub enum PttSpec {
     Trusdx,
 }
 
+/// macOS and Windows find a CM108 by USB id; there is no hidraw path.
+const NO_HIDRAW: bool = cfg!(any(target_os = "macos", windows));
+
 pub const RIGCTLD_DEFAULT: &str = "127.0.0.1:4532";
 
 impl PttSpec {
@@ -69,14 +74,12 @@ impl PttSpec {
             "vox" if rest.is_empty() => Ok(Self::Vox),
             "rts" => path("rts").map(Self::Rts),
             "dtr" => path("dtr").map(Self::Dtr),
-            "cm108" if cfg!(windows) => {
-                Err("--ptt cm108: not supported on Windows yet; use rts/dtr, rigctld or vox".into())
-            }
-            "cm108" if cfg!(target_os = "macos") && rest.starts_with('/') => {
-                Err("--ptt cm108: macOS has no hidraw; use cm108:VID:PID[:GPIO] (4-digit hex USB ids)".into())
-            }
+            "cm108" if NO_HIDRAW && rest.starts_with('/') => Err(format!(
+                "--ptt cm108: {} has no hidraw; use cm108:VID:PID[:GPIO] (4-digit hex USB ids)",
+                if cfg!(windows) { "Windows" } else { "macOS" }
+            )),
             "cm108" => Self::cm108(rest).ok_or_else(|| {
-                let dev = if cfg!(target_os = "macos") { "" } else { "/dev/hidrawN[:GPIO] or " };
+                let dev = if NO_HIDRAW { "" } else { "/dev/hidrawN[:GPIO] or " };
                 format!("--ptt cm108: expected {dev}VID:PID[:GPIO] (VID and PID as 4-digit hex, GPIO 1-8)")
             }),
             "trusdx" if !cfg!(feature = "trusdx") => {
@@ -85,7 +88,7 @@ impl PttSpec {
             "trusdx" if rest.is_empty() => Ok(Self::Trusdx),
             "rigctld" => Ok(Self::Rigctld(if rest.is_empty() { RIGCTLD_DEFAULT.into() } else { rest.into() })),
             _ => {
-                let cm108 = if cfg!(target_os = "macos") { "cm108:VID:PID[:GPIO]" } else { "cm108:DEV|VID:PID[:GPIO]" };
+                let cm108 = if NO_HIDRAW { "cm108:VID:PID[:GPIO]" } else { "cm108:DEV|VID:PID[:GPIO]" };
                 let mut all = vec!["vox", "rts:DEV", "dtr:DEV", cm108, "rigctld[:HOST:PORT]"];
                 if cfg!(feature = "trusdx") {
                     all.push("trusdx");
@@ -116,12 +119,9 @@ impl PttSpec {
             Self::Dtr(p) => Box::new(Serial::open(p, DTR)?),
             #[cfg(unix)]
             Self::Cm108 { path, gpio } => Box::new(Cm108::open(path, *gpio)?),
-            #[cfg(unix)]
             Self::Cm108Usb { vendor, product, gpio } => cm108_usb(*vendor, *product, *gpio)?,
             #[cfg(windows)]
-            Self::Cm108 { .. } | Self::Cm108Usb { .. } => {
-                return Err(io::Error::other("--ptt cm108 is not supported on Windows"));
-            }
+            Self::Cm108 { .. } => return Err(io::Error::other("--ptt cm108: on Windows give the USB id, VID:PID")),
             Self::Rigctld(a) => Box::new(Rigctld::open(a)?),
             Self::Trusdx => return Err(io::Error::other("--ptt trusdx comes with --audio trusdx")),
         })
