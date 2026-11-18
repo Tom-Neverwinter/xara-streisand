@@ -34,6 +34,7 @@ fn wire_text() {
         (Response::Tune(0.0), "TUNE 0"),
         (Response::CleanTxBuffer { empty: true }, "CLEANTXBUFFER BUFFEREMPTY"),
         (Response::CleanTxBuffer { empty: false }, "CLEANTXBUFFER FAILED "),
+        (Response::MissingSoundcard, "MISSING SOUNDCARD"),
         (Response::Version("VERSION VARA HF v4.9.0"), "VERSION VARA HF v4.9.0"),
         (Response::Line("CQFRAME N0CALL-5".into()), "CQFRAME N0CALL-5"),
     ];

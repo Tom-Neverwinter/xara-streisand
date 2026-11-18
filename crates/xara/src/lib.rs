@@ -1,20 +1,26 @@
 //! The xara modem and passive monitor: CLI, audio backends, PTT and the station loop that ties the other crates together.
-// On Windows: WinMM audio, serial (RTS/DTR) / rigctld / VOX PTT and console-event trapping; CM108 is Unix-only.
+// On Windows: WinMM audio, serial (RTS/DTR) / rigctld / VOX PTT and console-event trapping; CM108 by USB id.
 #[macro_use]
 pub mod log;
 pub mod audio;
+pub mod cat;
 #[cfg(target_os = "macos")]
 mod cf;
 pub mod cli;
+pub mod doppler;
 pub mod flac;
 #[cfg(target_os = "macos")]
 mod hid;
+#[cfg(windows)]
+mod hid_win;
 #[cfg(unix)]
 mod hidraw;
 pub mod monitor;
 pub mod ptt;
 pub mod record;
 pub mod resample;
+pub mod serial;
+pub mod shift;
 #[cfg(unix)]
 pub mod signals;
 #[cfg(windows)]
@@ -30,7 +36,10 @@ pub const FM_SPAN_HZ: u32 = 6000;
 
 #[cfg(target_os = "linux")]
 pub(crate) type Ioctl = libc::Ioctl;
-#[cfg(all(unix, not(target_os = "linux")))]
+// Bionic's ioctl() takes an int request, and its TIOCM* constants are c_int.
+#[cfg(target_os = "android")]
+pub(crate) type Ioctl = libc::c_int;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 pub(crate) type Ioctl = libc::c_ulong;
 
 pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {

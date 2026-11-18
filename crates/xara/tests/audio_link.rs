@@ -195,3 +195,55 @@ fn ssid_calls_link_over_audio() {
     assert!(air.run_until(90.0, |a| a.got[1].len() >= pa.len() && a.got[0].len() >= pb.len()), "{}", air.trace());
     assert_eq!((&air.got[1], &air.got[0]), (&pa, &pb));
 }
+
+/// A 2300 / 2750 station answers a 500 Hz caller at 500 Hz, as VARA gateways do.
+#[test]
+fn wide_station_answers_narrow_callers() {
+    for (caller, answerer, want) in [
+        (Bandwidth::Hz500, Bandwidth::Hz2300, Bandwidth::Hz500),
+        (Bandwidth::Hz500, Bandwidth::Hz2750, Bandwidth::Hz500),
+    ] {
+        let cfg = |bw, call: &str, seed| Config { seed, ..Config::new(bw, call) };
+        let mut air = Air::pair(
+            [
+                Station::new(cfg(caller, "N0CALL", 3), Options::default()),
+                Station::new(cfg(answerer, "N1CALL", 5), Options::default()),
+            ],
+            [2400, 2400],
+            0.002,
+            |r| matches!(r, Report::Host(HostEvent::Buffer(_) | HostEvent::Sn(_))),
+        );
+        air.st[0].connect("N0CALL", "N1CALL", &[]);
+        let line = Report::Host(HostEvent::Connected {
+            caller: "N0CALL".into(),
+            answerer: "N1CALL".into(),
+            vias: Vec::new(),
+            bw: want.into(),
+        });
+        let what = format!("{caller:?} calling {answerer:?}");
+        assert!(air.run_until(40.0, |a| a.has(0, &line) && a.has(1, &line)), "{what}\n{}", air.trace());
+        let (pa, pb) = (payload(300, 77), payload(100, 78));
+        air.st[0].send(&pa);
+        air.st[1].send(&pb);
+        assert!(air.run_until(90.0, |a| a.got[1].len() >= pa.len() && a.got[0].len() >= pb.len()), "{what}");
+        assert_eq!((&air.got[1], &air.got[0]), (&pa, &pb), "{what}");
+    }
+}
+
+/// Tuner enhancement: the gateway stays quiet for the caller's first two requests, then answers.
+#[test]
+fn tuner_enhancement_answers_the_third_request() {
+    for (tuner, want) in [(false, 1), (true, 3)] {
+        let mut air = pair(Bandwidth::Hz2300, true, 0.002, Lead::default());
+        let mut cfg = air.st[1].config().clone();
+        cfg.tuner = tuner;
+        air.st[1].reconfigure(cfg);
+        air.st[0].connect("N0CALL", "N1CALL", &[]);
+        let pending = Report::Host(HostEvent::Pending);
+        assert!(air.run_until(40.0, |a| a.has(1, &pending)), "{}", air.trace());
+        let trace = air.trace();
+        let before = trace.split("1 Host(Pending)").next().unwrap();
+        let calls = before.lines().filter(|l| l.contains(" 0 Trace(\"tx c") && l.ends_with("Calling\")")).count();
+        assert_eq!(calls, want, "tuner {tuner}:\n{trace}");
+    }
+}

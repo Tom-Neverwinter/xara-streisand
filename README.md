@@ -21,7 +21,7 @@ The aim is full compatibility with the entire VARA family, in one program that a
 | VARA Chat / VARA Terminal | xara speaks their TCP interface. End-to-end tests against the real apps are still pending |
 | Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` |
 
-Open gaps are tracked in the issues. Pick one up, see [CONTRIBUTING.md](CONTRIBUTING.md).
+The full feature-by-feature chart, with the test behind each line and the open gaps in priority order, is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Pick a gap up, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Who transmits
 
@@ -59,7 +59,7 @@ Keep `LICENSE` and the copyright notice (MIT requires it). To send a change back
 | Linux (x86_64, arm64, armv7, Raspberry Pi) | `pulse` (default; also PipeWire), `alsa` | rts/dtr, cm108, rigctld, vox | Primary platform. CI on every push |
 | macOS (Apple Silicon, Intel) | `coreaudio` | rts/dtr, cm108 (by USB id), rigctld, vox | CI-tested |
 | FreeBSD | `pulse`, `alsa` | rts/dtr, cm108 (via `hidraw`), rigctld, vox | CI type-checked |
-| Windows 10/11 | `winmm` | rts/dtr (`COM3`), rigctld, vox. No cm108 yet | New in this fork. Tests pass locally. The web UI cannot save settings yet. **Needs on-air testers** |
+| Windows 10/11 | `winmm` | rts/dtr (`COM3`), cm108 (by USB id), rigctld, vox | New in this fork. Tests pass locally. **Needs on-air testers** |
 | (tr)uSDX | `trusdx` (audio over the rig's USB serial) | built in | Experimental |
 
 Platform-specific dependencies and setup are in [BUILDING.md](BUILDING.md).
@@ -150,8 +150,10 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --audio BACKEND         pulse, alsa, coreaudio, winmm or trusdx; default pulse on linux/bsd,
                             coreaudio on macOS, winmm on Windows
     --list-devices          list capture and playback devices for --audio
+    --setup                 ask for call, mode, devices and PTT, then write the default config file
     --capture SOURCE        audio source
     --playback SINK         audio sink
+    --channel left|right|both  side of a stereo sound card the radio is on (default both: mono)
     --tx-buffer-ms N        TX audio queue, raise on underruns (30-500, default 40)
 
     --hf 500|2300|2750      HF mode, bandwidth setting
@@ -159,13 +161,18 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
 
     --radio                 enable radio mode
     --drive-db D            TX drive (<= 0 dB, default -5)
+    --tx-shift HZ           shift TX audio by HZ, e.g. for satellite Doppler (default 0)
+    --rx-shift HZ           shift RX audio by HZ before decoding (default 0)
+    --doppler FILE          follow a Doppler schedule: lines of UNIX_SECONDS RX_HZ TX_HZ, added to the shifts
     --ptt [see section]     PTT has a lot of options
+    --rig-freq HZ           tune the rig to HZ at startup (built-in CAT if --cat, else rigctld)
+    --cat KIND:PORT[:BAUD[:ADDR]]  built-in CAT: icom, kenwood, yaesu or yaesu5 (see PTT settings)
 
     --ui-port N             serve web UI on port N (default off)
     --ui-addr A             webui listen address (default 127.0.0.1)
     --ui-host NAME          accept as HTTP Host for UI (repeatable)
     --ui-token T            UI token (default: random)
-    --ui-control            DANGER: remote token-holders can key radio
+    --ui-control            DANGER: remote token-holders can key radio (and use the /chat terminal)
     --state-dir DIR         web UI settings storage (default: set by systemd)
 
     --addr A                KISS/command address (default: 127.0.0.1)
@@ -174,10 +181,15 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --persistence P         KISS p-persistence
 
     --unregistered          cap the link at unregistered VARA speeds (default: full speed)
+    --registered            no-op, kept so old configs still work
+    --offer-level N         HF: offer speed level N at link start instead of picking from S/N
+    --tuner-enhancement     HF gateway: let callers' first 2 connect requests pass, so an ATU can tune
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
     --log FILE              append UTC-timestamped output to FILE
+    --syslog HOST[:PORT]    also send the log to a syslog server over UDP (RFC 5424, port 514)
+    --syslog-name NAME      station name in syslog messages (default: your call)
     --quiet                 only output warnings and errors
     --version and --help    guess
 
@@ -186,8 +198,9 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
 we support the following PTT methods:
 
 - rts and dtr on a serial port
-- cm108/cm119 HID GPIO (Linux, macOS, FreeBSD; not yet on Windows)
+- cm108/cm119 HID GPIO (Linux and FreeBSD by hidraw path; macOS and Windows by USB id)
 - hamlib rigctld CAT
+- built-in CAT (no hamlib): Icom CI-V, Kenwood/Elecraft ASCII, newer Yaesu ASCII, classic Yaesu 5-byte
 - vox (not recommended)
 
 you can adjust the following PTT settings as well:
@@ -204,6 +217,19 @@ summary of settings:
     --ptt cm108:DEV[:GPIO]      cm108/cm119 HID GPIO (default GPIO: 3)
     --ptt cm108:VID:PID[:GPIO]  cm108/cm119 by hex USB id (stable across boots)
     --ptt rigctld[:HOST:PORT]   hamlib rigctld CAT on HOST:PORT
+    --ptt cat[:KIND:PORT...]    built-in CAT; bare `cat` uses --cat's rig
+
+built-in CAT (`--cat KIND:PORT[:BAUD[:ADDR]]`, also used by `--rig-freq`):
+
+    icom:COM4                   CI-V, 19200 baud, address 94 (IC-7300)
+    icom:/dev/ttyUSB0:115200:a4 IC-705 (others: IC-7610 98, IC-9700 a2, IC-7100 88)
+    kenwood:COM5[:38400]        Kenwood, Elecraft, QRP Labs QMX, (tr)uSDX (FA/TX/RX;)
+    yaesu:COM6[:38400]          FT-991A, FT-710, FTDX10 and other newer Yaesu (TX1;/TX0;)
+    yaesu5:COM7[:9600]          FT-817/818/857/897 5-byte commands, 2 stop bits
+
+the port is opened 8N1 (8N2 for yaesu5) with RTS and DTR held low; set the
+rig's CAT baud rate to match. Icom rigs reply to every command, so a wrong
+baud or CI-V address shows up at startup.
 
     --ptt-lead-ms N             PTT held for N ms before xmit (default: 0)
     --ptt-tail-ms N             PTT held for N ms after xmit (default: 100)
@@ -242,7 +268,19 @@ options:
     --verbose               report unconfirmed blind detections
     --json                  print newline-delimited JSON records
     --log FILE              append UTC-timestamped output to FILE
+    --syslog HOST[:PORT]    also send the log to a syslog server over UDP
+    --syslog-name NAME      station name in syslog messages (default: xara-monitor)
     --version and --help    guess
+
+## terminal page
+
+with `--ui-port` and `--ui-control`, the web UI has a `/chat` page: a
+keyboard-to-keyboard terminal. set your call and bandwidth, answer calls
+(LISTEN ON) or connect to a station, and type: each line goes out as plain
+text ending in CR, and the other side's text shows as it arrives (Latin-1 or
+UTF-8). it drives xara through its own command and data ports, like any VARA
+client program, so it can't be used while another client holds them. it
+follows the UI's display themes.
 
 ## full speed
 
