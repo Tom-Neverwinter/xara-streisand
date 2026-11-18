@@ -229,3 +229,21 @@ fn wide_station_answers_narrow_callers() {
         assert_eq!((&air.got[1], &air.got[0]), (&pa, &pb), "{what}");
     }
 }
+
+/// Tuner enhancement: the gateway stays quiet for the caller's first two requests, then answers.
+#[test]
+fn tuner_enhancement_answers_the_third_request() {
+    for (tuner, want) in [(false, 1), (true, 3)] {
+        let mut air = pair(Bandwidth::Hz2300, true, 0.002, Lead::default());
+        let mut cfg = air.st[1].config().clone();
+        cfg.tuner = tuner;
+        air.st[1].reconfigure(cfg);
+        air.st[0].connect("N0CALL", "N1CALL", &[]);
+        let pending = Report::Host(HostEvent::Pending);
+        assert!(air.run_until(40.0, |a| a.has(1, &pending)), "{}", air.trace());
+        let trace = air.trace();
+        let before = trace.split("1 Host(Pending)").next().unwrap();
+        let calls = before.lines().filter(|l| l.contains(" 0 Trace(\"tx c") && l.ends_with("Calling\")")).count();
+        assert_eq!(calls, want, "tuner {tuner}:\n{trace}");
+    }
+}
