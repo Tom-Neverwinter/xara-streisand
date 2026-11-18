@@ -7,7 +7,7 @@ use std::io;
 use std::time::Instant;
 
 use super::ratematch::{Queue, TxBuffer};
-use super::{Audio, BLOCK, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only, remaining};
+use super::{Audio, BLOCK, Channel, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only, pick, remaining, spread};
 
 #[allow(non_snake_case, clippy::upper_case_acronyms)]
 mod ffi {
@@ -111,13 +111,14 @@ fn mm(what: &str, rc: u32) -> io::Result<()> {
     if rc == 0 { Ok(()) } else { Err(io::Error::other(format!("{what}: WinMM error {rc}"))) }
 }
 
-fn format() -> WAVEFORMATEX {
+fn format(ch: Channel) -> WAVEFORMATEX {
+    let w = ch.width() as u16;
     WAVEFORMATEX {
         wFormatTag: WAVE_FORMAT_PCM,
-        nChannels: 1,
+        nChannels: w,
         nSamplesPerSec: RATE,
-        nAvgBytesPerSec: RATE * 2,
-        nBlockAlign: 2,
+        nAvgBytesPerSec: RATE * 2 * u32::from(w),
+        nBlockAlign: 2 * w,
         wBitsPerSample: 16,
         cbSize: 0,
     }
@@ -234,20 +235,21 @@ impl Buf {
 struct Capture {
     h: isize,
     ev: Event,
+    ch: Channel,
     bufs: VecDeque<Buf>, // in the order the driver fills them
 }
 
 impl Capture {
-    fn open(want: &str) -> io::Result<Self> {
+    fn open(want: &str, ch: Channel) -> io::Result<Self> {
         let id = find(&inputs(), want, "capture")?;
         let ev = Event::new()?;
         let mut h = 0;
         mm(&format!("opening capture {want:?}"), unsafe {
-            waveInOpen(&mut h, id, &format(), ev.0 as usize, 0, CALLBACK_EVENT)
+            waveInOpen(&mut h, id, &format(ch), ev.0 as usize, 0, CALLBACK_EVENT)
         })?;
-        let mut c = Self { h, ev, bufs: VecDeque::new() };
+        let mut c = Self { h, ev, ch, bufs: VecDeque::new() };
         for _ in 0..CAPTURE_BUFFERS {
-            let mut b = Buf::new(vec![0; BLOCK]);
+            let mut b = Buf::new(vec![0; BLOCK * ch.width()]);
             c.queue(&mut b)?;
             c.bufs.push_back(b);
         }
@@ -271,7 +273,7 @@ impl Capture {
         while self.bufs.front().is_some_and(Buf::done) {
             let mut b = self.bufs.pop_front().unwrap();
             unsafe { waveInUnprepareHeader(self.h, &mut *b.hdr, HDR) };
-            rx.extend(&b.data[..b.hdr.dwBytesRecorded as usize / 2]);
+            rx.extend(pick(&b.data[..b.hdr.dwBytesRecorded as usize / 2], self.ch));
             self.queue(&mut b)?;
             self.bufs.push_back(b);
         }
@@ -279,7 +281,8 @@ impl Capture {
     }
 
     fn ready(&self) -> usize {
-        self.bufs.iter().take_while(|b| b.done()).map(|b| b.hdr.dwBytesRecorded as usize / 2).sum()
+        let frame = 2 * self.ch.width();
+        self.bufs.iter().take_while(|b| b.done()).map(|b| b.hdr.dwBytesRecorded as usize / frame).sum()
     }
 }
 
@@ -297,26 +300,28 @@ struct Play {
     h: isize,
     ev: Event,
     name: String,
+    ch: Channel,
     cap: usize,
     sent: VecDeque<Buf>,
-    written: u32, // samples, wrapping like the driver's position counter
+    written: u32, // frames, wrapping like the driver's position counter
     report: Report,
     underruns: u64,
 }
 
 impl Play {
-    fn open(want: &str, radio: bool, tx: TxBuffer) -> io::Result<Self> {
+    fn open(want: &str, radio: bool, tx: TxBuffer, ch: Channel) -> io::Result<Self> {
         let names = outputs();
         let id = check_playback(&names, want, radio)?;
         let ev = Event::new()?;
         let mut h = 0;
         mm(&format!("opening playback {want:?}"), unsafe {
-            waveOutOpen(&mut h, id, &format(), ev.0 as usize, 0, CALLBACK_EVENT)
+            waveOutOpen(&mut h, id, &format(ch), ev.0 as usize, 0, CALLBACK_EVENT)
         })?;
         Ok(Self {
             h,
             ev,
             name: want.into(),
+            ch,
             cap: tx.capacity(),
             sent: VecDeque::new(),
             written: 0,
@@ -337,7 +342,7 @@ impl Play {
         let pos = unsafe { waveOutGetPosition(self.h, &mut t, size_of::<MMTIME>() as u32) };
         self.reap();
         if pos != 0 || t.wType != TIME_SAMPLES {
-            return self.sent.iter().map(|b| b.data.len()).sum();
+            return self.sent.iter().map(|b| b.data.len() / self.ch.width()).sum();
         }
         self.written.wrapping_sub(t.u) as usize
     }
@@ -363,13 +368,13 @@ pub struct WinmmIo {
 unsafe impl Send for WinmmIo {}
 
 impl WinmmIo {
-    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer) -> io::Result<Self> {
-        let play = Some(Play::open(playback, radio, tx)?);
-        Ok(Self { rec: Capture::open(capture)?, play, rx: VecDeque::new() })
+    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer, ch: Channel) -> io::Result<Self> {
+        let play = Some(Play::open(playback, radio, tx, ch)?);
+        Ok(Self { rec: Capture::open(capture, ch)?, play, rx: VecDeque::new() })
     }
 
     pub fn open_capture(capture: &str) -> io::Result<Self> {
-        Ok(Self { rec: Capture::open(capture)?, play: None, rx: VecDeque::new() })
+        Ok(Self { rec: Capture::open(capture, Channel::Both)?, play: None, rx: VecDeque::new() })
     }
 }
 
@@ -399,7 +404,9 @@ impl Audio for WinmmIo {
         if p.sent.is_empty() && p.written != 0 {
             p.underruns += 1; // everything we sent had played out before this block arrived
         }
-        let mut b = Buf::new(x.to_vec());
+        let mut data = Vec::new();
+        spread(x, p.ch, &mut data);
+        let mut b = Buf::new(data);
         mm("playback buffer", unsafe { waveOutPrepareHeader(p.h, &mut *b.hdr, HDR) })?;
         if let Err(e) = mm("playback write", unsafe { waveOutWrite(p.h, &mut *b.hdr, HDR) }) {
             unsafe { waveOutUnprepareHeader(p.h, &mut *b.hdr, HDR) };

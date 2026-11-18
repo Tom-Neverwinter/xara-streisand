@@ -191,6 +191,62 @@ impl Default for Backend {
     }
 }
 
+/// Which side of a stereo sound card the radio is on, as VARA's left / right / both setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Channel {
+    /// The device used as mono: the backend mixes capture down and plays on every channel.
+    #[default]
+    Both,
+    Left,
+    Right,
+}
+
+impl Channel {
+    /// The slot in an interleaved stereo frame, or None for mono.
+    pub fn index(self) -> Option<usize> {
+        match self {
+            Self::Both => None,
+            Self::Left => Some(0),
+            Self::Right => Some(1),
+        }
+    }
+
+    /// Frame width to open the device with.
+    pub fn width(self) -> usize {
+        if self == Self::Both { 1 } else { 2 }
+    }
+}
+
+impl std::str::FromStr for Channel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "both" => Ok(Self::Both),
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
+            _ => Err(format!("--channel {s:?}: expected left, right or both")),
+        }
+    }
+}
+
+/// Take one channel out of interleaved stereo.
+pub fn pick(stereo: &[i16], c: Channel) -> impl Iterator<Item = i16> + '_ {
+    let i = c.index().unwrap_or(0);
+    stereo.chunks_exact(c.width()).map(move |f| f[i])
+}
+
+/// Spread mono onto interleaved stereo, silent on the other side.
+pub fn spread(mono: &[i16], c: Channel, out: &mut Vec<i16>) {
+    let w = c.width();
+    out.clear();
+    out.resize(mono.len() * w, 0);
+    let i = c.index().unwrap_or(0);
+    for (f, &v) in out.chunks_exact_mut(w).zip(mono) {
+        f[i] = v;
+    }
+}
+
 impl std::str::FromStr for Backend {
     type Err = String;
 
@@ -260,18 +316,21 @@ pub fn open(
     radio: bool,
     tx: TxBuffer,
     speaker: bool,
+    ch: Channel,
 ) -> io::Result<Box<dyn Audio>> {
     match b {
         #[cfg(pulse)]
-        Backend::Pulse => Ok(Box::new(pulse::PulseIo::open(capture, playback, radio, tx)?)),
+        Backend::Pulse => Ok(Box::new(pulse::PulseIo::open(capture, playback, radio, tx, ch)?)),
         #[cfg(alsa)]
-        Backend::Alsa => Ok(Box::new(alsa::AlsaIo::open(capture, playback, radio, tx)?)),
+        Backend::Alsa => Ok(Box::new(alsa::AlsaIo::open(capture, playback, radio, tx, ch)?)),
         #[cfg(coreaudio)]
-        Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio, tx)?)),
+        Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio, tx, ch)?)),
+        #[cfg(feature = "trusdx")]
+        Backend::Trusdx if ch != Channel::Both => Err(io::Error::other("--channel does not apply to --audio trusdx")),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open(capture, playback, radio, speaker)?)),
         #[cfg(windows)]
-        Backend::Winmm => Ok(Box::new(winmm::WinmmIo::open(capture, playback, radio, tx)?)),
+        Backend::Winmm => Ok(Box::new(winmm::WinmmIo::open(capture, playback, radio, tx, ch)?)),
         _ => Err(unbuilt(b)),
     }
 }
@@ -328,6 +387,23 @@ pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channels_pick_and_spread_one_side() {
+        let st = [1, -1, 2, -2, 3, -3];
+        let got = |c| pick(&st, c).collect::<Vec<_>>();
+        assert_eq!((got(Channel::Left), got(Channel::Right)), (vec![1, 2, 3], vec![-1, -2, -3]));
+        assert_eq!(got(Channel::Both), st);
+        let mut out = Vec::new();
+        spread(&[5, 6], Channel::Right, &mut out);
+        assert_eq!(out, [0, 5, 0, 6]);
+        spread(&[5, 6], Channel::Left, &mut out);
+        assert_eq!(out, [5, 0, 6, 0]);
+        spread(&[5, 6], Channel::Both, &mut out);
+        assert_eq!(out, [5, 6]);
+        assert_eq!("right".parse(), Ok(Channel::Right));
+        assert!("mono".parse::<Channel>().is_err());
+    }
 
     #[test]
     fn samples_convert_at_the_device_boundary() {
