@@ -270,7 +270,7 @@ fn config_args(path: &Path) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for Entry { line, key, value } in settings::entries(&text).map_err(at)? {
         let at = |e: String| at(format!("line {line}: {e}"));
-        if key == "config" || key == "list-devices" {
+        if key == "config" || key == "list-devices" || key == "setup" {
             return Err(at(format!("{key} cannot be set from a config file")));
         }
         let flag = format!("--{key}");
@@ -291,11 +291,21 @@ fn config_args(path: &Path) -> Result<Vec<String>, String> {
 }
 
 fn default_config() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("xara/xara.conf")).filter(|p| p.exists())
+    config_home().filter(|p| p.exists())
+}
+
+/// `argv` less any `--config FILE`.
+fn without_config(argv: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut it = argv.iter();
+    while let Some(k) = it.next() {
+        if k == "--config" {
+            it.next();
+        } else {
+            out.push(k.clone());
+        }
+    }
+    out
 }
 
 fn with_config(argv: &[String]) -> Result<(Option<PathBuf>, Vec<String>), String> {
@@ -858,6 +868,11 @@ fn real_main() -> Result<ExitCode, String> {
     let cmdline: Vec<String> = std::env::args().skip(1).collect();
     let (config, argv) = match with_config(&cmdline) {
         Ok(c) => c,
+        // --setup is how a broken config gets replaced, so it must not need a readable one
+        Err(e) if cmdline.iter().any(|a| a == "--setup") => {
+            eprintln!("{e} (ignored: --setup writes a new one)");
+            (None, without_config(&cmdline))
+        }
         Err(e) => {
             eprintln!("{e}");
             return Ok(ExitCode::from(2));
@@ -1073,6 +1088,8 @@ mod tests {
         let text = setup_with(&mut "N0XRA\n\n1\n1\n\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).unwrap();
         assert!(text.contains("hf = 2300\n") && !text.contains("radio"));
         assert!(setup_with(&mut "N0XRA\n".as_bytes(), &mut Vec::new(), &d, Path::new("x")).is_err());
+        let v = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(without_config(&v("--setup --config bad.conf --audio pulse")), v("--setup --audio pulse"));
     }
 
     #[test]
@@ -1159,6 +1176,7 @@ mod tests {
             ("drive-db = loud\n", "line 1: --drive-db:"),
             ("config = other.conf\n", "line 1: config cannot be set"),
             ("list-devices\n", "line 1: list-devices cannot be set"),
+            ("setup\n", "line 1: setup cannot be set"),
             ("call N0CALL\n", "line 1: expected key = value"),
         ] {
             let p = conf("conf-bad", text);
