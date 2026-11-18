@@ -587,6 +587,11 @@ fn serve<M: Modem>(
         tnc.force_ptt_off(s.forced_off);
         Tick { keyed: tnc.keyed(), tuning: tnc.station().tuning(), restart: tnc.restart_requested() }
     });
+    if pumped.audio.is_err() {
+        tnc.missing_soundcard();
+        // shortcut: a fixed wait for the writer thread to send it before we exit; wait on the queue if it ever gets cut off.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
     Ok(Outcome { drive_db: tnc.station().options().drive_db, restart: tnc.restart_requested(), pumped })
 }
 
@@ -607,7 +612,7 @@ fn pump(
             };
             let dev = match dev {
                 Ok(d) => d,
-                Err(e) => return Pumped { audio: Err(e), ptt: Ok(()) },
+                Err(e) => return Pumped { audio: Ok(()), ptt: Err(e) },
             };
             say!(
                 "RADIO MODE: transmitting into {:?}, PTT {}, lead {} ms, tail {:?}, watchdog {:?}",
