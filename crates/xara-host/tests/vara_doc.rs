@@ -1,6 +1,6 @@
 //! Conformance against VARA's published "VARA Protocol Native TNC Commands" (EA5HVK, 2025-10-10).
-//! Keep in step with docs/COMPATIBILITY.md: when a NOT_YET reply gets implemented this test fails
-//! until it moves out of NOT_YET and the chart is updated.
+//! Keep in step with docs/COMPATIBILITY.md: when a NOT_SENT reply gets implemented this test fails
+//! until it moves out of NOT_SENT and the chart is updated.
 use xara_host::command::parse;
 use xara_host::response::{LinkWidth, Response};
 
@@ -68,6 +68,7 @@ fn xara_replies() -> Vec<String> {
         Response::Tune(-5.0),
         Response::CleanTxBuffer { empty: true },
         Response::CleanTxBuffer { empty: false },
+        Response::MissingSoundcard,
         // Decoded CQs go out as a plain line built by xara_arq::cq.
         Response::Line("CQFRAME N0CALL 2300".into()),
     ]
@@ -107,8 +108,10 @@ const DOC_REPLIES: [&str; 26] = [
     "WRONG",
 ];
 
-/// Documented replies xara never sends yet. See docs/COMPATIBILITY.md for why each one is open.
-const NOT_YET: [&str; 4] = ["MISSING SOUNDCARD", "CLEANTXBUFFER OK", "ENCRYPTION READY", "ENCRYPTED LINK"];
+/// Documented replies xara does not send, on purpose. See docs/COMPATIBILITY.md §3.
+/// CLEANTXBUFFER OK: real VARA HF 4.9.0 answers FAILED and keeps the data (vectors/host), so xara does too.
+/// ENCRYPTION READY / ENCRYPTED LINK: no encryption on amateur bands.
+const NOT_SENT: [&str; 3] = ["CLEANTXBUFFER OK", "ENCRYPTION READY", "ENCRYPTED LINK"];
 
 fn sent(replies: &[String], keyword: &str) -> bool {
     replies.iter().any(|r| r == keyword || r.starts_with(&format!("{keyword} ")))
@@ -118,9 +121,11 @@ fn sent(replies: &[String], keyword: &str) -> bool {
 fn every_documented_reply_is_sent_or_listed_as_a_gap() {
     let replies = xara_replies();
     for k in DOC_REPLIES {
-        match (sent(&replies, k), NOT_YET.contains(&k)) {
-            (true, true) => panic!("{k:?} is implemented now: drop it from NOT_YET and update docs/COMPATIBILITY.md"),
-            (false, false) => panic!("{k:?} is documented by VARA but xara never sends it: add it to NOT_YET"),
+        match (sent(&replies, k), NOT_SENT.contains(&k)) {
+            (true, true) => panic!("{k:?} is sent now: drop it from NOT_SENT and update docs/COMPATIBILITY.md"),
+            (false, false) => {
+                panic!("{k:?} is documented by VARA but xara never sends it: add it to NOT_SENT with the reason")
+            }
             _ => {}
         }
     }

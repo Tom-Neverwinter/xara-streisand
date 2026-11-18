@@ -2,7 +2,7 @@
 
 What xara-streisand does against each part of the VARA suite, what is missing, and what to work on next.
 
-**Sources:** VARA's published documents only: "VARA Protocol Native TNC Commands" (EA5HVK, 2025-10-10), the VARA KISS interface note, the HF 4.7 Quick Guide, "VARA FM 4.0", and the changelogs shipped with each program. The xara side is read from `main` and its tests. Status checked 2026-11-17.
+**Sources:** VARA's published documents only: "VARA Protocol Native TNC Commands" (EA5HVK, 2025-10-10), the VARA KISS interface note, the HF 4.7 Quick Guide, "VARA FM 4.0", and the changelogs shipped with each program. The xara side is read from `main` and its tests. Status checked 2026-11-18.
 
 **Legend:**
 - ✅ works, with the test that proves it;
@@ -11,7 +11,7 @@ What xara-streisand does against each part of the VARA suite, what is missing, a
 - 🔀 on a branch, not merged yet;
 - ➖ deliberately out of scope.
 
-`cargo test --workspace` runs every test named here. The command and reply tables are checked by [`crates/xara-host/tests/vara_doc.rs`](../crates/xara-host/tests/vara_doc.rs): it fails if xara drifts from the published command set, or if a gap below gets fixed without updating this chart.
+`cargo test --workspace` runs every test named here. The command and reply tables are checked by [`crates/xara-host/tests/vara_doc.rs`](../crates/xara-host/tests/vara_doc.rs): it fails if xara drifts from the published command set, or if a reply listed as not sent starts being sent without updating this chart.
 
 ## 1. The suite at a glance
 
@@ -41,9 +41,9 @@ Every documented command is understood (`vara_doc.rs::every_documented_command_i
 | `CHAT ON` / `OFF`, `LISTEN CQ` | ✅ | Chat timing and CQ listening |
 | `WINLINK SESSION` / `P2P SESSION` | ✅ | Retry cycle, `hf_timing.rs` |
 | `TUNE -X` / `TUNE ?` / `TUNE OFF` | ✅ | |
-| `CLEANTXBUFFER` | 🟡 | Reports whether the buffer is empty, but **never erases it**. VARA erases data not yet sent and answers OK. See gap G3 |
+| `CLEANTXBUFFER` | ✅ | As real VARA HF 4.9.0 does it: `BUFFEREMPTY`, or `FAILED` with the queued data kept (`vectors/host`, `host_protocol.rs`). The PDF's erase-and-`OK` is not what 4.9.0 sends |
 | `VERSION` | ✅ | |
-| Not in the PDF but used by apps: `RETRIES`, `DRIVELEVEL`, `IGNOREKISSDCD`, `PUBLIC`, `GATEWAY`, `CWID` | ✅ / 🟡 | `CWID ON/OFF` and `PUBLIC` are accepted but change nothing (gap G4) |
+| Not in the PDF but used by apps: `RETRIES`, `DRIVELEVEL`, `IGNOREKISSDCD`, `PUBLIC`, `GATEWAY`, `CWID` | ✅ | `CWID ON/OFF` turns the disconnect CW ID on or off for non-US calls (`host_protocol.rs::cwid_on_off_sets_the_link_config`). `PUBLIC` answers `OK` like 4.9.0; VARA documents no effect for it |
 
 ## 3. Replies (modem → application)
 
@@ -56,10 +56,10 @@ Every documented command is understood (`vara_doc.rs::every_documented_command_i
 | `CQFRAME src [bw]` | ✅ | `xara-arq/src/cq.rs` |
 | `SN`, `BITRATE (level) bps` | ✅ | |
 | `CLEANTXBUFFER BUFFEREMPTY` / `FAILED` | ✅ | Spelled as real VARA 4.9.0 sends them (`vectors/host`); the PDF runs the words together |
-| `CLEANTXBUFFER OK` | ❌ | Gap G3 |
+| `CLEANTXBUFFER OK` | ➖ | Real VARA HF 4.9.0 never sends it (see §2) |
 | `ENCRYPTION DISABLED`, `UNENCRYPTED LINK` | ✅ | |
 | `ENCRYPTION READY`, `ENCRYPTED LINK` | ➖ | VARA's AES-256 is only for licensed non-amateur services; encrypted traffic is not allowed on amateur bands in most countries |
-| `MISSING SOUNDCARD` | ❌ | Gap G5 |
+| `MISSING SOUNDCARD` | ✅ | Sent when the audio device fails, just before xara exits, so gateway software can restart it |
 | `OK`, `WRONG` | ✅ | |
 
 ## 4. KISS / APRS interface
@@ -79,10 +79,10 @@ Every documented command is understood (`vara_doc.rs::every_documented_command_i
 | Adaptive speed (up and down the level ladder) | ✅ | `adapt.rs`, `link.rs`, golden runs in `xara-arq/tests/golden` |
 | Full speed by default (all levels + compression) | ✅ | `--unregistered` caps it like unregistered VARA |
 | Busy-channel detector | ✅ | `xara-phy/tests/busy.rs` |
-| CW ID at disconnect | 🟡 | Forced for US calls, as in VARA; `CWID ON/OFF` doesn't toggle it for others (G4) |
+| CW ID at disconnect | ✅ | Always for US calls, as in VARA; `CWID ON` for everyone else |
 | Callsign hashing / multiple MYCALLs | ✅ | `crc_call.rs` |
 | Files up to 600 000 bytes per session (HF) | ✅ | TX ring size |
-| Accept a 500 Hz caller while set to 2300 / 2750 | ❌ | VARA has an "Accept 500 Hz connections" option; xara only listens for its own bandwidth group. Gap G2 |
+| Accept a 500 Hz caller while set to 2300 / 2750 | ✅ | Answered and run at 500 Hz (`audio_link.rs::wide_station_answers_narrow_callers`). Always on; VARA makes it an option |
 | Gateway first-reply delay for antenna tuners, "Tuner enhancement" extra retries | ❌ | Quick Guide options. Gap G6 |
 
 ## 6. VARA FM extras
@@ -120,10 +120,6 @@ Every gap here can be built and tested without transmitting: two xara instances,
 | # | Gap | Why it matters | Where to start |
 |---|---|---|---|
 | G1 | **Prove FM against real VARA FM** | FM is the most-used emcomm mode after HF Winlink | issue #1; loopback xara↔VARA FM on virtual cables |
-| G2 | **Accept 500 Hz callers on a 2300/2750 station** | Gateways set to 2300 take 500 Hz clients in VARA | `xara-arq/src/hf/session.rs` `request_codes()` / `on_request()` |
-| G3 | **`CLEANTXBUFFER` that really erases, `CLEANTXBUFFER OK`** | Chat apps (VarAC and others) use it to cancel queued text | `xara/src/tnc.rs` `Command::CleanTxBuffer`; move `CLEANTXBUFFER OK` out of `NOT_YET` in `vara_doc.rs` |
-| G4 | **`CWID ON/OFF` and `PUBLIC` should take effect** | Non-US operators who must ID can't turn it on from their app | `tnc.rs` → `hf::Config::cwid` |
-| G5 | **`MISSING SOUNDCARD`** | Lets gateway software restart after a USB audio crash | audio backends' error path → `Response` |
 | G6 | **Gateway tuner delay / tuner-enhancement retries** | Gateways with auto-tuners after a band change | `hf/timing.rs` |
 | G7 | **FM Ping and Autotune** | Route testing and level setting on FM nets | `xara-arq/src/fm/session.rs` (frames already parse) |
 | G8 | **FM audio equalisation** | Handhelds with slow receivers | `xara-phy/src/fm` |
@@ -131,5 +127,7 @@ Every gap here can be built and tested without transmitting: two xara instances,
 | G10 | **VARA SAT** | QO-100 users | merge `doppler`, then the SAT link layer |
 | G11 | **End-to-end runs with VARA Chat, Terminal, VarAC, Pat** | Proves the client side | issue #4 |
 | G12 | **The 2027 VARA format** | Talking to upgraded stations after 2027-01-01 | not started in this repo |
+
+Closed: G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), 2026-11-18. Numbers are kept so old issue references still point somewhere.
 
 Pick one, open an issue saying you're on it, and see [CONTRIBUTING.md](../CONTRIBUTING.md). Clean sources only: published documents, our own recordings and lab loopback, never VARA's binaries.
