@@ -266,6 +266,7 @@ options:
     --key-idle MIN          max target idle time (default: 30, 0 disables)
     --dump                  dump entire payloads
     --verbose               report unconfirmed blind detections
+    --diag                  per-frame decode stats and raw session headers
     --json                  print newline-delimited JSON records
     --log FILE              append UTC-timestamped output to FILE
     --syslog HOST[:PORT]    also send the log to a syslog server over UDP
