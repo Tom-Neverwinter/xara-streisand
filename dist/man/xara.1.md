@@ -179,6 +179,9 @@ along with KISS for applications such as Pat. See the README for full details.
 **--offer-level** *N*
 :   HF: offer speed level N at link start instead of picking from S/N
 
+**--tuner-enhancement**
+:   HF gateway: let callers' first 2 connect requests pass, so an ATU can tune
+
 **-h**, **--help**, **-V**, **--version**
 
 :   Print the usage or the version and exit.

@@ -58,6 +58,7 @@ struct Args {
     state_dir: Option<String>,
     registered: bool,
     offer_level: Option<usize>,
+    tuner: bool,
     radio: bool,
     ptt: Option<PttSpec>,
     timing: PttTiming,
@@ -97,6 +98,7 @@ fn defaults() -> Args {
         // Full speed by default; --unregistered caps the link like an unregistered VARA.
         registered: true,
         offer_level: None,
+        tuner: false,
         radio: false,
         ptt: None,
         timing: PttTiming::default(),
@@ -171,6 +173,7 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--registered" => a.registered = true,
         "--unregistered" => a.registered = false,
         "--offer-level" => a.offer_level = Some(num(k, &v()?)?),
+        "--tuner-enhancement" => a.tuner = true,
         _ if k == "--trusdx-speaker" => return Err(format!("{k}: xara was built without the trusdx feature")),
         _ => return Err(format!("unknown option {k}")),
     }
@@ -247,6 +250,9 @@ fn check(a: &Args) -> Result<(), String> {
     }
     if trusdx && a.channel != audio::Channel::Both {
         return Err("--channel does not apply to --audio trusdx".into());
+    }
+    if a.tuner && a.fm.is_some() {
+        return Err("--tuner-enhancement is an HF gateway option".into());
     }
     if a.trusdx_speaker && !trusdx {
         return Err("--trusdx-speaker needs --audio trusdx".into());
@@ -520,6 +526,7 @@ fn run(
         None => {
             let mut cfg = hf::Config {
                 offer_level: a.offer_level.map(|n| Record::clamped(n, Record::MAX)),
+                tuner: a.tuner,
                 ..hf::Config::new(a.bw, &a.call)
             };
             cfg.host.registered = a.registered;

@@ -177,6 +177,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --unregistered          cap the link at unregistered VARA speeds (default: full speed)
     --registered            no-op, kept so old configs still work
     --offer-level N         HF: offer speed level N at link start instead of picking from S/N
+    --tuner-enhancement     HF gateway: let callers' first 2 connect requests pass, so an ATU can tune
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
