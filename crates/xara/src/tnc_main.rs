@@ -7,7 +7,7 @@ use xara::audio::ratematch::{self, TxBuffer};
 use xara::audio::txpath::TxPath;
 use xara::audio::{self, Audio, Backend, Behind};
 use xara::cli::{self, UiArgs, Usage, num};
-use xara::ptt::{PttCtl, PttSpec, PttTiming};
+use xara::ptt::{PttCtl, PttSpec, PttTiming, Rigctld};
 use xara::record::{self, Recorder};
 use xara::say;
 use xara::shift::Shift;
@@ -52,6 +52,8 @@ struct Args {
     persistence: f64,
     addr: String,
     drive_db: f64,
+    rig_freq: Option<u64>,
+    cat: Option<xara::cat::CatSpec>,
     tx_shift: f64,
     rx_shift: f64,
     doppler: Option<xara::doppler::Schedule>,
@@ -94,6 +96,8 @@ fn defaults() -> Args {
         persistence: xara_arq::hf::broadcast::DEFAULT_PERSISTENCE,
         addr: xara::DEFAULT_ADDR.into(),
         drive_db: DEFAULT_DRIVE_DB,
+        rig_freq: None,
+        cat: None,
         tx_shift: 0.0,
         rx_shift: 0.0,
         doppler: None,
@@ -156,6 +160,8 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--persistence" => a.persistence = finite(k, &v()?)?.clamp(0.0, 1.0),
         "--addr" => a.addr = v()?,
         "--drive-db" => a.drive_db = finite(k, &v()?)?,
+        "--rig-freq" => a.rig_freq = Some(num(k, &v()?)?),
+        "--cat" => a.cat = Some(xara::cat::CatSpec::parse(&v()?)?),
         "--tx-shift" => a.tx_shift = finite(k, &v()?)?,
         "--rx-shift" => a.rx_shift = finite(k, &v()?)?,
         "--doppler" => {
@@ -343,6 +349,28 @@ fn with_config(argv: &[String]) -> Result<(Option<PathBuf>, Vec<String>), String
     let mut all = config_args(&path)?;
     all.extend(rest);
     Ok((Some(path), all))
+}
+
+/// Tune the rig once at startup: through built-in CAT (--cat, or --ptt cat:...) when given, else rigctld (the
+/// one --ptt rigctld names, or rigctld's default address).
+fn tune(a: &Args, hz: u64) -> std::io::Result<()> {
+    let cat = a.cat.clone().or_else(|| match &a.ptt {
+        Some(PttSpec::Cat(c)) => c.clone(),
+        _ => None,
+    });
+    if let Some(c) = cat {
+        let mut rig = c.open()?;
+        rig.set_frequency(hz)?;
+        say!("rig tuned to {hz} Hz via {}", rig.describe());
+        return Ok(());
+    }
+    let addr = match &a.ptt {
+        Some(PttSpec::Rigctld(r)) => r.clone(),
+        _ => xara::ptt::RIGCTLD_DEFAULT.to_string(),
+    };
+    Rigctld::open(&addr)?.set_frequency(hz)?;
+    say!("rig tuned to {hz} Hz via rigctld at {addr}");
+    Ok(())
 }
 
 fn tx_buffer(a: &Args) -> TxBuffer {
@@ -811,6 +839,14 @@ fn real_main() -> Result<ExitCode, String> {
     xara::log::init("xara", base.quiet);
     if let Some(p) = &base.log {
         xara::log::open(p).map_err(|e| format!("--log {}: {e}", p.display()))?;
+    }
+    let mut base = base;
+    if base.ptt == Some(PttSpec::Cat(None)) {
+        let c = base.cat.clone().ok_or("--ptt cat needs --cat KIND:PORT[:BAUD[:ADDR]] (or --ptt cat:KIND:PORT...)")?;
+        base.ptt = Some(PttSpec::Cat(Some(c)));
+    }
+    if let Some(hz) = base.rig_freq {
+        tune(&base, hz).map_err(|e| format!("--rig-freq {hz}: {e}"))?;
     }
     if let Some(p) = &config {
         say!("config {}", p.display());
