@@ -260,7 +260,12 @@ impl Capture {
     fn queue(&self, b: &mut Buf) -> io::Result<()> {
         b.hdr.dwFlags = 0;
         mm("capture buffer", unsafe { waveInPrepareHeader(self.h, &mut *b.hdr, HDR) })?;
-        mm("capture buffer", unsafe { waveInAddBuffer(self.h, &mut *b.hdr, HDR) })
+        let r = mm("capture buffer", unsafe { waveInAddBuffer(self.h, &mut *b.hdr, HDR) });
+        if r.is_err() {
+            // a prepared header must be unprepared before its buffer is freed
+            unsafe { waveInUnprepareHeader(self.h, &mut *b.hdr, HDR) };
+        }
+        r
     }
 
     /// Move every filled buffer, in order, onto `rx` and hand it back to the driver.
@@ -403,7 +408,10 @@ impl Audio for WinmmIo {
         spread(x, p.ch, &mut data);
         let mut b = Buf::new(data);
         mm("playback buffer", unsafe { waveOutPrepareHeader(p.h, &mut *b.hdr, HDR) })?;
-        mm("playback write", unsafe { waveOutWrite(p.h, &mut *b.hdr, HDR) })?;
+        if let Err(e) = mm("playback write", unsafe { waveOutWrite(p.h, &mut *b.hdr, HDR) }) {
+            unsafe { waveOutUnprepareHeader(p.h, &mut *b.hdr, HDR) };
+            return Err(e);
+        }
         p.written = p.written.wrapping_add(x.len() as u32);
         p.sent.push_back(b);
         Ok(())
