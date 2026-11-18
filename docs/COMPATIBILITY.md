@@ -18,7 +18,7 @@ What xara-streisand does against each part of the VARA suite, what is missing, a
 | VARA product | xara | Notes |
 |---|---|---|
 | VARA HF 4.9.0 (500 / 2300 / 2750) | ✅ | Decodes real on-air VARA HF, including full Winlink sessions. All 13 / 16 / 17 published speed levels. |
-| VARA FM 4.4.0 (narrow / wide) | 🟡 | Full PHY and ARQ, digipeating; passes xara↔xara over simulated audio. Interop with real VARA FM is unproven (issue #1). |
+| VARA FM 4.4.0 (narrow / wide) | ✅ | Proven against real VARA FM 4.4.1 in a lab loopback on 2026-11-18 (§6). Digipeating is xara↔xara only so far. |
 | VARA SAT 4.4.5 (QO-100) | ❌ | TX/RX frequency shift and Doppler schedules are in (`--tx-shift`, `--rx-shift`, `--doppler`). The SAT link itself is not: its speed table matches HF levels, but on air its handshake is not VARA HF's (see G10). |
 | VARA Chat 1.4.3 | 🟡 | xara is the modem Chat drives (ports 8300/8301). Not run end-to-end against the real app yet (issue #4). |
 | VARA Terminal 1.2.2 | 🟡 | Same as Chat. |
@@ -89,13 +89,24 @@ Every documented command is understood (`vara_doc.rs::every_documented_command_i
 
 | Feature | xara | Notes |
 |---|---|---|
-| Narrow / wide, all levels | 🟡 | `fm_audio_link.rs`, `fm_link.rs`; real-VARA interop unproven |
+| Narrow / wide, all levels | ✅ | Real VARA FM 4.4.1 and xara on one virtual audio loop, 2026-11-18. Connect, data both ways, byte-checked, and disconnect worked in all four cases (narrow/wide × either side calling). Results in the table below this one |
 | Digipeater, up to 2 hops (`--digi`) | ✅ | `fm_digi_link.rs` |
 | Ping (route test) | ❌ | Frames decode (`xara-monitor --fm` shows them); xara neither sends nor answers them. Gap G7 |
 | Autotune | ❌ | Same as Ping. Gap G7 |
 | Variable TX delay for handhelds | 🟡 | Use `--ptt-lead-ms`; there is no FM-specific setting |
 | Audio equalisation for slow handheld receivers | ❌ | Gap G8 |
 | Monitor log of all stations on frequency | ✅ | `xara-monitor --fm` |
+
+Lab runs against real VARA FM 4.4.1 (unregistered), nothing transmitted:
+
+| Mode | Caller | Data each way | Highest level the other side decoded |
+|---|---|---|---|
+| narrow | VARA FM | 2000 / 1000 bytes, all correct | 2 (an unregistered caller caps the whole link) |
+| narrow | xara | 2000 / 1000 bytes, all correct | 7, 7087 bps |
+| wide | VARA FM | 6000 / 3000 bytes, all correct | 2 (same cap) |
+| wide | xara | 20000 / 10000 bytes, all correct | 12, 22102 bps |
+
+VARA FM's `FM Mode` setting is 1 for narrow and 2 for wide.
 
 ## 7. Station, radio and setup
 
@@ -119,13 +130,12 @@ Every gap here can be built and tested without transmitting: two xara instances,
 
 | # | Gap | Why it matters | Where to start |
 |---|---|---|---|
-| G1 | **Prove FM against real VARA FM** | FM is the most-used emcomm mode after HF Winlink | issue #1; loopback xara↔VARA FM on virtual cables |
 | G7 | **FM Ping and Autotune** | Route testing and level setting on FM nets | `xara-arq/src/fm/session.rs` (frames already parse) |
 | G8 | **FM audio equalisation** | Handhelds with slow receivers | `xara-phy/src/fm` |
 | G10 | **VARA SAT link layer** | QO-100 users | Lab test 2026-11-18, VARA SAT 4.4.5 and xara HF 2300 on one virtual audio loop: VARA SAT does not answer HF connect requests, and its own requests (0.88 s, about 485-2460 Hz) are not HF control frames at any bandwidth or at any frequency offset within ±400 Hz. Its control frames have to be worked out from recordings of its audio before xara can link with it. Issue #5 |
 | G11 | **End-to-end runs with VARA Chat, Terminal, VarAC, Pat** | Proves the client side | issue #4 |
 | G12 | **The 2027 VARA format** | Talking to upgraded stations after 2027-01-01 | not started in this repo |
 
-Closed: G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), G6 (`--tuner-enhancement`), G9 (`--channel`), 2026-11-18. Numbers are kept so old issue references still point somewhere.
+Closed: G1 (VARA FM interop, §6), G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), G6 (`--tuner-enhancement`), G9 (`--channel`), 2026-11-18. Numbers are kept so old issue references still point somewhere.
 
 Pick one, open an issue saying you're on it, and see [CONTRIBUTING.md](../CONTRIBUTING.md). Clean sources only: published documents, our own recordings and lab loopback, never VARA's binaries.
