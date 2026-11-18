@@ -72,6 +72,8 @@ struct Args {
     channel: audio::Channel,
     record: Option<PathBuf>,
     log: Option<PathBuf>,
+    syslog: Option<String>,
+    syslog_name: Option<String>,
     hf_given: bool,
     list_devices: bool,
 }
@@ -117,6 +119,8 @@ fn defaults() -> Args {
         channel: audio::Channel::Both,
         record: None,
         log: None,
+        syslog: None,
+        syslog_name: None,
         hf_given: false,
         list_devices: false,
     }
@@ -188,6 +192,8 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--trusdx-speaker" => a.trusdx_speaker = true,
         "--record" => a.record = Some(PathBuf::from(v()?)),
         "--log" => a.log = Some(PathBuf::from(v()?)),
+        "--syslog" => a.syslog = Some(v()?),
+        "--syslog-name" => a.syslog_name = Some(v()?),
         "--list-devices" => a.list_devices = true,
         // Kept so old command lines and configs still parse; full speed is the default now.
         "--registered" => a.registered = true,
@@ -869,6 +875,10 @@ fn real_main() -> Result<ExitCode, String> {
     }
     if let Some(hz) = base.rig_freq {
         tune(&base, hz).map_err(|e| format!("--rig-freq {hz}: {e}"))?;
+    }
+    if let Some(to) = &base.syslog {
+        let station = base.syslog_name.clone().unwrap_or_else(|| base.call.clone());
+        xara::log::syslog(to, &station).map_err(|e| format!("--syslog {to}: {e}"))?;
     }
     if let Some(p) = &config {
         say!("config {}", p.display());
