@@ -163,6 +163,7 @@ fn host(o: Obj, r: &Response) -> String {
         Response::UnencryptedLink => kind("unencrypted_link"),
         Response::Tune(_) => kind("tune"),
         Response::CleanTxBuffer { .. } => kind("clean_tx_buffer"),
+        Response::MissingSoundcard => kind("missing_soundcard"),
         Response::Version(_) => kind("version"),
         Response::Line(_) => kind("line"),
     }
