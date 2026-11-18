@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Rust dependencies: security and version updates for the workspace.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # One PR for routine minor/patch bumps; security updates still come alone.
+      cargo-minor:
+        update-types:
+          - minor
+          - patch
+
+  # Keep the CI Actions pinned and patched.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

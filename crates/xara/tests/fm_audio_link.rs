@@ -173,8 +173,15 @@ fn record16_kiss_and_cq_over_audio() {
     assert!(a.st[0].cq_frame("N0CALL-5", Some("NARROW")));
     assert!(a.run_until(6.0, |a| kiss_lines(a, 1).iter().any(|l| l.starts_with("CQFRAME"))));
     assert!(kiss_lines(&a, 1).contains(&"CQFRAME N0CALL-5".to_string()));
+    // a CHAT ON client with no KISS client (VarAC) still hears CQs
     a.st[1].set_kiss_rx(false);
-    a.st[1].refresh_listen();
+    assert!(a.run_until(2.0, |a| a.st[0].idle()));
+    let n = kiss_lines(&a, 1).len();
+    assert!(a.st[0].cq_frame("N0CALL-7", None));
+    assert!(a.run_until(6.0, |a| kiss_lines(a, 1).len() > n));
+    assert!(kiss_lines(&a, 1).contains(&"CQFRAME N0CALL-7".to_string()));
+    // neither KISS nor CHAT: record 16 is not decoded
+    a.st[1].update(|c| c.host.chat = false);
     assert!(a.run_until(2.0, |a| a.st[0].idle()));
     let n = kiss_lines(&a, 1).len();
     assert!(a.st[0].cq_frame("N0CALL", None));
@@ -182,6 +189,18 @@ fn record16_kiss_and_cq_over_audio() {
     assert_eq!(kiss_lines(&a, 1).len(), n);
     assert!(a.st[0].idle());
     assert_eq!(a.st[1].state(), fm::State::Listen);
+}
+
+#[test]
+fn chat_station_hears_cq_after_sending_its_own() {
+    // tx latency delays the unkey, as on a real sound card (lab, 2026-11-18: VarAC B stopped
+    // hearing CQs and beacons after calling CQ itself)
+    let mut a = fm_air([FmBandwidth::Narrow; 2], false, 0.0, Lead { ms: [100, 100], told: true });
+    a.st[1].update(|c| c.host.chat = true);
+    assert!(a.st[1].cq_frame("N0CALL-1", None));
+    assert!(a.run_until(4.0, |a| a.st[1].idle()));
+    assert!(a.st[0].cq_frame("N0CALL-9", None));
+    assert!(a.run_until(6.0, |a| kiss_lines(a, 1).contains(&"CQFRAME N0CALL-9".to_string())));
 }
 
 fn led(ms: [i64; 2], told: bool) -> Result<Air, Failure> {
