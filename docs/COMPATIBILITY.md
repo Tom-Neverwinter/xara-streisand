@@ -19,7 +19,7 @@ What xara-streisand does against each part of the VARA suite, what is missing, a
 |---|---|---|
 | VARA HF 4.9.0 (500 / 2300 / 2750) | ✅ | Decodes real on-air VARA HF, including full Winlink sessions. All 13 / 16 / 17 published speed levels. |
 | VARA FM 4.4.0 (narrow / wide) | 🟡 | Full PHY and ARQ, digipeating; passes xara↔xara over simulated audio. Interop with real VARA FM is unproven (issue #1). |
-| VARA SAT 4.4.5 (QO-100) | ❌ | Not in xara. The generic part, TX/RX frequency shift and Doppler tracking, is 🔀 on `tx-rx-shift` / `doppler` (issue #5). |
+| VARA SAT 4.4.5 (QO-100) | ❌ | TX/RX frequency shift and Doppler schedules are in (`--tx-shift`, `--rx-shift`, `--doppler`). The SAT link itself is not: its speed table matches HF levels, but on air its handshake is not VARA HF's (see G10). |
 | VARA Chat 1.4.3 | 🟡 | xara is the modem Chat drives (ports 8300/8301). Not run end-to-end against the real app yet (issue #4). |
 | VARA Terminal 1.2.2 | 🟡 | Same as Chat. |
 | VARA HF 4.9.1 / FM 4.4.1 after 2027-01-01 | ❌ | Those versions change their on-air format on 2027-01-01 (shown publicly by K3JSJ and KT7RUN). xara speaks the 4.9.0 / 4.4.0 format. |
@@ -122,7 +122,7 @@ Every gap here can be built and tested without transmitting: two xara instances,
 | G1 | **Prove FM against real VARA FM** | FM is the most-used emcomm mode after HF Winlink | issue #1; loopback xara↔VARA FM on virtual cables |
 | G7 | **FM Ping and Autotune** | Route testing and level setting on FM nets | `xara-arq/src/fm/session.rs` (frames already parse) |
 | G8 | **FM audio equalisation** | Handhelds with slow receivers | `xara-phy/src/fm` |
-| G10 | **VARA SAT** | QO-100 users | merge `doppler`, then the SAT link layer |
+| G10 | **VARA SAT link layer** | QO-100 users | Lab test 2026-11-18, VARA SAT 4.4.5 and xara HF 2300 on one virtual audio loop: VARA SAT does not answer HF connect requests, and its own requests (0.88 s, about 485-2460 Hz) are not HF control frames at any bandwidth or at any frequency offset within ±400 Hz. Its control frames have to be worked out from recordings of its audio before xara can link with it. Issue #5 |
 | G11 | **End-to-end runs with VARA Chat, Terminal, VarAC, Pat** | Proves the client side | issue #4 |
 | G12 | **The 2027 VARA format** | Talking to upgraded stations after 2027-01-01 | not started in this repo |
 
