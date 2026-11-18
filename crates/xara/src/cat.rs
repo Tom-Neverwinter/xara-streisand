@@ -65,22 +65,32 @@ impl CatSpec {
             "yaesu5" => Kind::Yaesu5,
             _ => return Err(usage.into()),
         };
-        // A Windows port can be \\.\COM12, which has no ':'; a Unix one is a path.  Split options off the end.
+        // A Windows port can be \\.\COM12; a Unix one is a path that may itself hold ':' (by-path names).
+        // So only peel BAUD (a supported rate) and then CI-V ADDR off the end, and keep the rest as the port.
         let mut parts: Vec<&str> = rest.split(':').collect();
-        let addr = if kind == Kind::Icom && parts.len() == 3 {
+        let is_baud = |p: &str| p.parse().is_ok_and(|b| serial::BAUDS.contains(&b));
+        let n = parts.len();
+        let addr = if kind == Kind::Icom && n >= 3 && is_baud(parts[n - 2]) {
             let a = parts.pop().unwrap();
-            u8::from_str_radix(a.trim_start_matches("0x"), 16)
-                .map_err(|_| format!("--cat: CI-V address {a:?} is not hex"))?
+            let v = u8::from_str_radix(a.trim_start_matches("0x"), 16)
+                .map_err(|_| format!("--cat: CI-V address {a:?} is not hex"))?;
+            // 00 is broadcast; E0-FF are controller addresses and the FD/FE framing bytes
+            if v == 0 || v >= 0xe0 {
+                return Err(format!("--cat: CI-V address {a:?} must be 01-df"));
+            }
+            v
         } else {
             ICOM_DEFAULT_ADDR
         };
-        let baud = match parts.len() {
-            2 => parts.pop().unwrap().parse().map_err(|_| format!("--cat: bad baud rate in {s:?}"))?,
-            1 => kind.default_baud(),
-            _ => return Err(usage.into()),
+        let baud = match parts.last() {
+            Some(b) if parts.len() >= 2 && b.bytes().all(|c| c.is_ascii_digit()) => {
+                let b = parts.pop().unwrap();
+                b.parse().map_err(|_| format!("--cat: bad baud rate in {s:?}"))?
+            }
+            _ => kind.default_baud(),
         };
-        let port = parts[0].to_string();
-        if port.is_empty() {
+        let port = parts.join(":");
+        if port.is_empty() || (port.contains(':') && !port.starts_with('/')) {
             return Err(usage.into());
         }
         if !serial::BAUDS.contains(&baud) {
@@ -141,6 +151,16 @@ impl Cat {
     }
 
     pub fn set_frequency(&mut self, hz: u64) -> io::Result<()> {
+        // what each frequency field can hold; anything above would be silently cut to another frequency
+        let max = match self.spec.kind {
+            Kind::Icom => 9_999_999_999,
+            Kind::Kenwood => 99_999_999_999,
+            Kind::Yaesu => 999_999_999,
+            Kind::Yaesu5 => 999_999_990,
+        };
+        if hz == 0 || hz > max {
+            return Err(self.err(&format!("{hz} Hz is out of range (1 to {max})")));
+        }
         match self.spec.kind {
             Kind::Icom => self.civ(&[&[0x05][..], &icom_bcd(hz)].concat()),
             Kind::Kenwood | Kind::Yaesu => {
@@ -239,13 +259,28 @@ mod tests {
 
     #[test]
     fn specs_parse() {
-        let p = |s| CatSpec::parse(s);
+        let p = CatSpec::parse;
         assert_eq!(p("icom:COM4"), Ok(CatSpec { kind: Kind::Icom, port: "COM4".into(), baud: 19200, addr: 0x94 }));
         assert_eq!(p("icom:/dev/ttyUSB0:115200:a4").unwrap().addr, 0xa4);
         assert_eq!(p("kenwood:/dev/ttyUSB0").unwrap().baud, 38400);
         assert_eq!(p("yaesu5:COM3:4800").unwrap().baud, 4800);
         assert_eq!(p("elecraft:COM7:9600").unwrap().kind, Kind::Kenwood);
-        for bad in ["icom", "icom:", "icom:COM4:fast", "icom:COM4:19200:zz", "kenwood:COM1:1234", "ft8:COM1"] {
+        let by_path = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:2:1.0-port0";
+        assert_eq!(p(&format!("icom:{by_path}")).unwrap().port, by_path);
+        assert_eq!(
+            p(&format!("icom:{by_path}:9600:a4")).unwrap(),
+            CatSpec { kind: Kind::Icom, port: by_path.into(), baud: 9600, addr: 0xa4 }
+        );
+        for bad in [
+            "icom",
+            "icom:",
+            "icom:COM4:fast",
+            "icom:COM4:19200:zz",
+            "icom:COM4:19200:fd",
+            "icom:COM4:19200:00",
+            "kenwood:COM1:1234",
+            "ft8:COM1",
+        ] {
             assert!(p(bad).is_err(), "{bad}");
         }
     }
