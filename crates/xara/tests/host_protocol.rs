@@ -68,6 +68,15 @@ fn command_line_framing() {
 }
 
 #[test]
+fn cwid_on_off_sets_the_link_config() {
+    let (mut lab, mut c) = solo();
+    for (cmd, want) in [("CWID ON", true), ("CWID OFF", false)] {
+        assert_eq!(ask(&mut lab, &mut c, format!("{cmd}\r").as_bytes(), 1), ["OK"]);
+        assert_eq!(lab.tnc[0].station().config().cwid, want, "{cmd}");
+    }
+}
+
+#[test]
 fn retries_chain() {
     let (mut lab, mut c) = solo();
     let r = |lab: &Lab| lab.tnc[0].station().config().host.retries;
