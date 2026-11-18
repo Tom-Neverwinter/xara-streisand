@@ -316,7 +316,7 @@ fn fm_lab() -> (Lab<xara::station::fm::Station>, Vec<Feed>) {
 #[test]
 fn fm_ui_link_controls_stats_and_history() {
     let (mut lab, f) = fm_lab();
-    let mut a = lab.attach(0);
+    let a = lab.attach(0);
     lab.settle();
     f[1].control(Control::Listen(true));
     lab.settle();
