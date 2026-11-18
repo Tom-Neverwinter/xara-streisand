@@ -324,19 +324,28 @@ impl<T> AudioQueue<T> {
         Arc::as_ptr(user).cast_mut().cast()
     }
 
-    fn set_device(&self, uid: &str, device_channels: u32) -> io::Result<()> {
+    /// Select the device and, for one side of a stereo card or a card with more than two channels, the channel.
+    fn set_device(&self, uid: &str, device_channels: u32, pick: Option<usize>) -> io::Result<()> {
         let s = Cf::string(uid)?;
         let p = s.ptr();
         // SAFETY: the queue is live and the value is a CFStringRef, which the queue retains.
         status(&format!("selecting {uid:?}"), unsafe {
             AudioQueueSetProperty(self.raw, QUEUE_CURRENT_DEVICE, (&raw const p).cast(), size_of_val(&p) as u32)
         })?;
-        if device_channels <= 2 {
-            return Ok(());
-        }
-        let a = ChannelAssignment { uid: p, channel: 1 };
+        let channel = match pick {
+            Some(i) if i as u32 >= device_channels => {
+                return Err(io::Error::other(format!(
+                    "{uid:?} has {device_channels} channel(s): no channel {}",
+                    i + 1
+                )));
+            }
+            Some(i) => i as u32 + 1,
+            None if device_channels > 2 => 1,
+            None => return Ok(()),
+        };
+        let a = ChannelAssignment { uid: p, channel };
         // SAFETY: the queue is live and stopped; a is one assignment for its one channel, and the queue retains the UID.
-        status(&format!("channel 1 of {uid:?}"), unsafe {
+        status(&format!("channel {channel} of {uid:?}"), unsafe {
             AudioQueueSetProperty(self.raw, QUEUE_CHANNEL_ASSIGNMENTS, (&raw const a).cast(), size_of_val(&a) as u32)
         })
     }
@@ -358,6 +367,7 @@ impl<T: Capture> AudioQueue<T> {
     pub fn input(
         format: &StreamFormat,
         device: &DeviceInfo,
+        pick: Option<usize>,
         user: Arc<T>,
         buffers: usize,
         frames: usize,
@@ -368,7 +378,7 @@ impl<T: Capture> AudioQueue<T> {
             AudioQueueNewInput(format, captured::<T>, Self::context(&user), null(), null(), 0, &mut raw)
         })?;
         let q = Self { raw, user };
-        q.set_device(&device.uid, device.inputs)?;
+        q.set_device(&device.uid, device.inputs, pick)?;
         for _ in 0..buffers {
             let b = q.allocate(frames)?;
             // SAFETY: b was just allocated from the live queue and is not enqueued yet.
@@ -382,6 +392,7 @@ impl<T: Playback> AudioQueue<T> {
     pub fn output(
         format: &StreamFormat,
         device: &DeviceInfo,
+        pick: Option<usize>,
         user: Arc<T>,
         buffers: usize,
         frames: usize,
@@ -392,7 +403,7 @@ impl<T: Playback> AudioQueue<T> {
             AudioQueueNewOutput(format, drained::<T>, Self::context(&user), null(), null(), 0, &mut raw)
         })?;
         let q = Self { raw, user };
-        q.set_device(&device.uid, device.outputs)?;
+        q.set_device(&device.uid, device.outputs, pick)?;
         for _ in 0..buffers {
             let b = q.allocate(frames)?;
             // SAFETY: b was just allocated from the live queue and is not enqueued yet, so it is ours to fill.
