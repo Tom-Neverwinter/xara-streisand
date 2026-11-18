@@ -23,6 +23,8 @@ use xara_phy::fm::tx::CONNECT_LEAD_IN;
 
 /// VARA FM's Autotune sends this many AutoTune records.
 const AUTOTUNE_STEPS: u8 = 10;
+/// Steps above the first one heard that xara's Autotune reply names (3 steps is 9 to 12 dB over the weakest heard).
+const AUTOTUNE_MARGIN: u8 = 3;
 
 pub(crate) const RX_GRACE: Time = 2400;
 const REPEAT_LIMIT: u32 = 100;
@@ -810,10 +812,11 @@ impl Session {
     }
 
     /// VARA FM's Autotune: the caller sends 10 AutoTune records, each louder than the last (step in byte 33); after the
-    /// tenth the target replies with a level in byte 34, and the caller sets its drive level from that.
-    /// shortcut: xara sends (first step heard) << 4, which is 0x10 on any path that decodes step 1. Real VARA sent
-    /// 0x0c, 0x10 or 0x18 over the same clean loop and the scale is unknown; and if step 10 is lost no reply goes out.
-    /// Upgrade when VARA's choice of byte 34 is mapped (lab: vary the level into the target, read the caller's result).
+    /// tenth the target replies with a step in byte 34 (step << 2), and the caller sets its drive to that step's level
+    /// counted from step 10 = 0 dB (lab, 2026-11-18: 1 = -30, 2 = -25, 4 = -18, 5 = -15, 6 = -12, 8 = -6 dB; step 0 or
+    /// above 10 shows NO SIGNAL). Real VARA picked steps 3 to 7, mostly 4, over a clean loop whatever the level into it,
+    /// so xara answers three steps above the first one it heard: 4 on a clean path, louder when the weak steps are lost.
+    /// shortcut: VARA's own choice is not level-driven and its rule is unknown; if step 10 is lost no reply goes out.
     fn on_autotune(&mut self, r: &Record0, snr_db: f64) {
         if self.state != State::Listen || self.core.transmitting || r.hop != 0 || r.vias() != 0 {
             return;
@@ -830,9 +833,10 @@ impl Session {
             return;
         }
         let first = self.autotune.take().map_or(step, |(_, s)| s);
+        let pick = (first + AUTOTUNE_MARGIN).min(AUTOTUNE_STEPS);
         let wide = r.wide && self.cfg.bw == FmBandwidth::Wide;
         let snr = snr_byte(snr_db + SNR_OFFSET_DB);
-        let Some(bytes) = Record0::tune_reply(&me, &r.source, wide, snr, first << 4).to_bytes() else { return };
+        let Some(bytes) = Record0::tune_reply(&me, &r.source, wide, snr, pick << 2).to_bytes() else { return };
         self.ping_reply = true;
         self.core.transmitting = true;
         self.core.out.push_back(Output::Tx(Tx::Data {

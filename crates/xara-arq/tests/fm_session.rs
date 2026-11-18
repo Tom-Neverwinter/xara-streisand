@@ -129,9 +129,10 @@ fn hex_ping() -> Vec<u8> {
     unhex("424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d")
 }
 
-/// VARA FM's Autotune: stay quiet through the ten louder-and-louder records, then reply with the first step heard.
+/// VARA FM's Autotune: stay quiet through the ten louder-and-louder records, then name the step three above the
+/// first one heard (byte 34 = step << 2).
 #[test]
-fn autotune_replies_with_the_first_step_heard() {
+fn autotune_replies_three_steps_above_the_first_heard() {
     use xara_phy::fm::frame::{Kind, Record0};
     let mut s = fm::Session::new(fm::Config::new(FmBandwidth::Wide, "N1CALL"));
     drain(&mut s);
@@ -158,7 +159,7 @@ fn autotune_replies_with_the_first_step_heard() {
         .collect();
     assert_eq!((pending, replies.len()), (1, 1), "{out:?}");
     let r = Record0::parse(&replies[0]).unwrap();
-    assert_eq!((r.kind, r.tune, r.target.as_str()), (Kind::Reply, 0x30, "N0CALL"));
+    assert_eq!((r.kind, r.tune, r.target.as_str()), (Kind::Reply, 6 << 2, "N0CALL"));
     s.on_tx_done(11 * SECOND);
     assert!(drain(&mut s).iter().any(|o| matches!(o, fm::Output::Host(HostEvent::CancelPending))));
 }
