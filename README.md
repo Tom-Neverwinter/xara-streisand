@@ -161,6 +161,9 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
 
     --radio                 enable radio mode
     --drive-db D            TX drive (<= 0 dB, default -5)
+    --tx-shift HZ           shift TX audio by HZ, e.g. for satellite Doppler (default 0)
+    --rx-shift HZ           shift RX audio by HZ before decoding (default 0)
+    --doppler FILE          follow a Doppler schedule: lines of UNIX_SECONDS RX_HZ TX_HZ, added to the shifts
     --ptt [see section]     PTT has a lot of options
 
     --ui-port N             serve web UI on port N (default off)
