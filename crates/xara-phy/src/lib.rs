@@ -17,5 +17,6 @@ pub mod hf;
 mod ofdm;
 mod receiver;
 pub mod rnd;
+pub mod sat;
 pub mod seq;
 pub mod turbo;
