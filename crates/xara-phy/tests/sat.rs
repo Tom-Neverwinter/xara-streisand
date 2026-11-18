@@ -1,4 +1,4 @@
-use xara_phy::sat::{SYMBOL_SAMPLES, connect_request, preamble, request_tones, synth};
+use xara_phy::sat::{SYMBOL_SAMPLES, connect_reply, connect_request, preamble, reply_tones, request_tones, synth};
 
 /// Connect-request codewords measured from real VARA SAT 4.4.5 in a lab loopback (2026-11-18), one per target call.
 /// The source call did not change them (N0CALL, N0CALM and N0CALL-7 calling N1CALL all sent the first row).
@@ -67,4 +67,17 @@ fn finds_a_request_for_its_call_only() {
     let want = 3000 + PREAMBLE_SYMBOLS * SYMBOL_SAMPLES;
     assert!(at.abs_diff(want) <= SYMBOL_SAMPLES / 8, "at {at}, want {want}, score {score}");
     assert_eq!(find_request(&x, "N1CALM", 0.3), None);
+}
+
+/// Replies real VARA SAT 4.4.5 sent to xara's synthesized requests in the lab (2026-11-18), keyed by its own call.
+#[test]
+fn connect_replies_match_vara_sat() {
+    for (call, want) in [
+        ("N1CALL", "32 19 48 43 28 51 24 27 26 37 46 31 20 27 26 17 20 39 30 41 26 17 38 51 52 49 38 15 14 33 18"),
+        ("N1CALM", "22 29 28 23 34 41 48 11 18 37 48 31 24 15 16 47 40 33 44 39 36 13 20 35 48 47 30 13 30 19 26"),
+        ("B2B", "40 13 34 15 30 33 30 35 30 29 48 23 14 15 24 29 28 21 34 37 20 47 50 11 34 17 16 43 20 33 20"),
+    ] {
+        assert_eq!(connect_reply(call), tones(want), "{call}");
+    }
+    assert_eq!(reply_tones("N1CALL", false)[..10], preamble()[..]);
 }
