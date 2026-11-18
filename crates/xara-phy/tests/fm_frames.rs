@@ -35,6 +35,22 @@ fn record0_spec_vector() {
     assert_eq!((snr_byte(-3.0), snr_byte(0.5), snr_byte(40.0)), (1, 4, 245));
 }
 
+/// A Ping and its Reply between two real VARA FM 4.4.1 stations (wide), recorded in a lab loopback on 2026-11-18.
+#[test]
+fn vara_ping_and_reply() {
+    let ping = hex::decode("424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d").unwrap();
+    let reply = hex::decode("624e3143414c4c2000202020202020200020202020202020004e3043414c4c2000f50001001096").unwrap();
+    let p = Record0::parse(&ping).unwrap();
+    assert_eq!(
+        (p.kind, p.source.as_str(), p.target.as_str(), p.wide, p.control),
+        (Kind::Ping, "N0CALL", "N1CALL", true, 1)
+    );
+    assert_eq!(p.to_bytes().unwrap(), ping);
+    let r = Record0::parse(&reply).unwrap();
+    assert_eq!((r.kind, r.snr), (Kind::Reply, 245));
+    assert_eq!(Record0::ping_reply("N1CALL", "N0CALL", true, 245).to_bytes().unwrap(), reply);
+}
+
 #[test]
 fn fm_lab_frames() {
     let v = common::load_doc("fm/lab_frames");

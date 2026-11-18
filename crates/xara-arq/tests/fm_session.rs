@@ -75,3 +75,39 @@ fn compressed_frame_with_a_lost_frame_2_is_still_expanded() {
     let out = drain(&mut s);
     assert_eq!(delivered(&out), &b"[WL2K-5.0-B2FWIHJM$]\r"[..e.consumed], "{out:?}");
 }
+
+/// A listening station answers VARA FM's Ping with a Reply carrying the S/N it heard, then CANCELPENDING.
+#[test]
+fn a_direct_ping_gets_a_reply() {
+    use xara_phy::fm::frame::{Kind, Record0, snr_byte};
+    let mut s = fm::Session::new(fm::Config::new(FmBandwidth::Wide, "N1CALL"));
+    drain(&mut s);
+    let ping = hex_ping();
+    s.on_record0(0, &ping, 20.0);
+    let out = drain(&mut s);
+    assert!(matches!(out[0], fm::Output::Host(HostEvent::Pending)), "{out:?}");
+    let reply = out
+        .iter()
+        .find_map(|o| if let fm::Output::Tx(fm::Tx::Data { frames, .. }) = o { Some(frames[0].clone()) } else { None })
+        .expect("a reply on the air");
+    let r = Record0::parse(&reply).unwrap();
+    assert_eq!((r.kind, r.source.as_str(), r.target.as_str(), r.wide), (Kind::Reply, "N1CALL", "N0CALL", true));
+    assert_eq!(r.snr, snr_byte(20.0 + fm::adapt::SNR_OFFSET_DB));
+    s.on_tx_done(SECOND);
+    assert!(drain(&mut s).iter().any(|o| matches!(o, fm::Output::Host(HostEvent::CancelPending))));
+    assert_eq!(s.state(), fm::State::Listen);
+    // Not ours, or through a digipeater: no answer.
+    for other in [
+        Record0 { target: "N9XYZ".into(), ..Record0::parse(&ping).unwrap() },
+        Record0 { via1: "N2CALL".into(), ..Record0::parse(&ping).unwrap() },
+    ] {
+        s.on_record0(2 * SECOND, &other.to_bytes().unwrap(), 20.0);
+        assert!(drain(&mut s).is_empty());
+    }
+}
+
+/// The Ping real VARA FM 4.4.1 sent from N0CALL to N1CALL (wide) in the lab, 2026-11-18.
+fn hex_ping() -> Vec<u8> {
+    let h = "424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d";
+    (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect()
+}

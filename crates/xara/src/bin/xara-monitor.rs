@@ -378,7 +378,7 @@ fn fm_source(input: &Input) -> String {
 // monitor uses, so the input handling mirrors it.
 fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
     let known: Vec<String> = a.mon.calls.iter().chain(&a.mon.names).cloned().collect();
-    let mut m = FmMonitor::new(bw, &fm::Opts { known: known.clone() });
+    let mut m = FmMonitor::new(bw, &fm::Opts { known: known.clone(), dump: a.mon.dump });
     xara::log::line(
         true,
         format_args!(

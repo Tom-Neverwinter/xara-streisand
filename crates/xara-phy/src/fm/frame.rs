@@ -147,6 +147,8 @@ pub struct Record0 {
     pub via1: String,
     pub via2: String,
     pub target: String,
+    /// Byte 33: in a Reply, the S/N (`snr_byte`) the answering station heard the Ping at.
+    pub snr: u8,
     pub aes: bool,
     pub compression: u8,
     pub control: u8,
@@ -190,6 +192,19 @@ impl Record0 {
         }
     }
 
+    /// The answer to a Ping, as real VARA FM sends it (control 1, flags 0, the heard S/N in byte 33).
+    pub fn ping_reply(source: &str, target: &str, wide: bool, snr: u8) -> Self {
+        Self {
+            kind: Kind::Reply,
+            source: source.into(),
+            target: target.into(),
+            wide,
+            snr,
+            control: 0x01,
+            ..Self::default()
+        }
+    }
+
     pub fn vias(&self) -> usize {
         usize::from(!self.via1.is_empty()) + usize::from(!self.via2.is_empty())
     }
@@ -199,7 +214,9 @@ impl Record0 {
     }
 
     fn flags(&self, comp: u8) -> u8 {
-        u8::from(self.aes) << 6 | 0x08 | (comp & 3) << 1
+        // Bit 3 is set in connects only; VARA FM's Ping and Reply records carry flags 0.
+        let connect = if self.kind == Kind::Connect { 0x08 } else { 0 };
+        u8::from(self.aes) << 6 | connect | (comp & 3) << 1
     }
 
     pub fn to_bytes(&self) -> Option<Vec<u8>> {
@@ -208,7 +225,7 @@ impl Record0 {
         for c in [&self.source, &self.via1, &self.via2, &self.target] {
             f.extend(call_field(c)?);
         }
-        f.extend([0, self.flags(comp), self.control, self.chain_snr]);
+        f.extend([self.snr, self.flags(comp), self.control, self.chain_snr]);
         Some(seal(f))
     }
 
@@ -234,6 +251,7 @@ impl Record0 {
             via1: call(1),
             via2: call(2),
             target: call(3),
+            snr: f[33],
             aes: f[34] & 0x40 != 0,
             compression: (f[34] >> 1) & 3,
             control: f[35],

@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use xara_phy::call::call_hash;
 use xara_phy::fm::ctrl::code::*;
 use xara_phy::fm::ctrl::{LEAD_ROWS, LeadIn};
-use xara_phy::fm::frame::{DataFrame, Kind, Record0, Trailer, build_data, parse_data};
+use xara_phy::fm::frame::{DataFrame, Kind, Record0, Trailer, build_data, parse_data, snr_byte};
 use xara_phy::fm::level::{DataLevel, FmBandwidth, Record};
 use xara_phy::fm::tx::CONNECT_LEAD_IN;
 
@@ -145,6 +145,8 @@ pub struct Session {
     connected: bool,
     registered: bool,
     first_turn: bool,
+    /// A Ping reply is on the air: tell the client CANCELPENDING once it has gone, as VARA FM does.
+    ping_reply: bool,
 
     level: Record,
     prev_level: Record,
@@ -218,6 +220,7 @@ impl Session {
             nack_run: 0,
             repeats: 0,
             first_turn: false,
+            ping_reply: false,
             data_stored: false,
             last_held: 0,
             link: Link::default(),
@@ -516,6 +519,9 @@ impl Session {
     pub fn on_tx_done(&mut self, now: Time) {
         self.core.transmitting = false;
         self.core.tx_end = now;
+        if std::mem::take(&mut self.ping_reply) {
+            self.core.host(HostEvent::CancelPending);
+        }
         let vias = self.vias.len();
         let w = match self.state {
             State::Calling => Some(caller_connect_window(self.bw, vias, false)),
@@ -717,6 +723,10 @@ impl Session {
 
     pub fn on_record0(&mut self, now: Time, bytes: &[u8], snr_db: f64) {
         let Some(r) = Record0::parse(bytes) else { return };
+        if r.kind == Kind::Ping {
+            self.on_ping(&r, snr_db);
+            return;
+        }
         if r.kind != Kind::Connect || usize::from(r.hop) != r.vias() {
             return;
         }
@@ -759,6 +769,29 @@ impl Session {
         self.core.host(HostEvent::Connected { caller, answerer, vias, bw: LinkBw::Fm(bw) });
         self.core.host(HostEvent::Registered(self.registered));
         self.say(if self.bw == FmBandwidth::Wide { CONNECT_REPLY_WIDE } else { CONNECT_REPLY_NARROW }, State::AwaitGo);
+    }
+
+    /// VARA FM's Ping (route test): a listening station answers a direct Ping for one of its calls with a Reply
+    /// carrying the S/N it heard. Pings through digipeaters are not answered yet.
+    fn on_ping(&mut self, r: &Record0, snr_db: f64) {
+        if self.state != State::Listen || self.core.transmitting || r.hop != 0 || r.vias() != 0 {
+            return;
+        }
+        let Some(me) = self.cfg.host.mycalls.iter().find(|c| c.eq_ignore_ascii_case(&r.target)).cloned() else {
+            return;
+        };
+        let wide = r.wide && self.cfg.bw == FmBandwidth::Wide;
+        let Some(bytes) = Record0::ping_reply(&me, &r.source, wide, snr_byte(snr_db + SNR_OFFSET_DB)).to_bytes() else {
+            return;
+        };
+        self.core.host(HostEvent::Pending);
+        self.ping_reply = true;
+        self.core.transmitting = true;
+        self.core.out.push_back(Output::Tx(Tx::Data {
+            record: Record::Connect,
+            frames: vec![bytes],
+            lead: CONNECT_LEAD_IN,
+        }));
     }
 
     fn ctrl_await_go(&mut self, code: u32) {
