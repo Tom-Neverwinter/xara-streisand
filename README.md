@@ -152,6 +152,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --list-devices          list capture and playback devices for --audio
     --capture SOURCE        audio source
     --playback SINK         audio sink
+    --channel left|right|both  side of a stereo sound card the radio is on (default both: mono)
     --tx-buffer-ms N        TX audio queue, raise on underruns (30-500, default 40)
 
     --hf 500|2300|2750      HF mode, bandwidth setting

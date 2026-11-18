@@ -61,6 +61,12 @@ Pulse sink, ALSA PCM, or CoreAudio device to transmit into (required).
 Without \f[B]\-\-radio\f[R], it must be a Pulse null sink, the ALSA
 \f[B]null\f[R] PCM, or a virtual CoreAudio device such as BlackHole.
 .TP
+\f[B]\-\-channel\f[R] left|right|both
+Which side of a stereo sound card the radio is on, as VARA\[cq]s channel
+setting.
+Default \f[B]both\f[R]: the device is used as mono.
+Not for \f[B]\-\-audio trusdx\f[R].
+.TP
 \f[B]\-\-tx\-buffer\-ms\f[R] \f[I]N\f[R]
 Transmit audio queued ahead of the sound card, in ms.
 30\-500 (default 40).

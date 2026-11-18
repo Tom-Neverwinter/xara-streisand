@@ -103,7 +103,7 @@ Every documented command is understood (`vara_doc.rs::every_documented_command_i
 |---|---|---|
 | Operating systems | Windows only | ✅ Linux, macOS, FreeBSD, Windows; Android 🔀 (`android-headless`, `android-audio`) |
 | Audio | Windows sound cards | ✅ PulseAudio/PipeWire, ALSA, CoreAudio, WinMM, (tr)uSDX |
-| Left / right / both sound-card channel | ✅ | ❌ gap G9 (mono only) |
+| Left / right / both sound-card channel | ✅ | ✅ `--channel left\|right\|both` on WinMM, PulseAudio, ALSA and CoreAudio (not (tr)uSDX) |
 | PTT: serial RTS/DTR, CM108 GPIO, VOX | ✅ | ✅ (CM108 on Windows 🔀 `windows-cm108`) |
 | PTT / tuning via CAT | ✅ Chat/Terminal rig lists | ✅ via hamlib `rigctld`; built-in CAT 🔀 `cat-control` |
 | Remote Syslog client | ✅ (registered only) | 🔀 `syslog` |
@@ -123,11 +123,10 @@ Every gap here can be built and tested without transmitting: two xara instances,
 | G6 | **Gateway tuner delay / tuner-enhancement retries** | Gateways with auto-tuners after a band change | `hf/timing.rs` |
 | G7 | **FM Ping and Autotune** | Route testing and level setting on FM nets | `xara-arq/src/fm/session.rs` (frames already parse) |
 | G8 | **FM audio equalisation** | Handhelds with slow receivers | `xara-phy/src/fm` |
-| G9 | **Left / right channel selection** | Stereo interfaces with two radios | `xara/src/audio` |
 | G10 | **VARA SAT** | QO-100 users | merge `doppler`, then the SAT link layer |
 | G11 | **End-to-end runs with VARA Chat, Terminal, VarAC, Pat** | Proves the client side | issue #4 |
 | G12 | **The 2027 VARA format** | Talking to upgraded stations after 2027-01-01 | not started in this repo |
 
-Closed: G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), 2026-11-18. Numbers are kept so old issue references still point somewhere.
+Closed: G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), G9 (`--channel`), 2026-11-18. Numbers are kept so old issue references still point somewhere.
 
 Pick one, open an issue saying you're on it, and see [CONTRIBUTING.md](../CONTRIBUTING.md). Clean sources only: published documents, our own recordings and lab loopback, never VARA's binaries.

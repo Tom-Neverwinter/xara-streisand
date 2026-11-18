@@ -12,6 +12,7 @@ maintained fork of x0rro/xara after upstream was withdrawn.
 - HF stations set to 2300 / 2750 now answer 500 Hz callers, at 500 Hz
 - `CWID ON/OFF` takes effect (US calls always ID, as before)
 - `MISSING SOUNDCARD` is sent to the client when the audio device fails
+- `--channel left|right|both`: use one side of a stereo sound card, as VARA's channel setting
 - docs/COMPATIBILITY.md: feature-by-feature chart against the VARA suite, checked by `vara_doc.rs`
 - docs: platform support table, Windows build notes, contributor guide
 

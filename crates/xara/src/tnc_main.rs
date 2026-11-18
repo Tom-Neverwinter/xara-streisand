@@ -62,6 +62,7 @@ struct Args {
     ptt: Option<PttSpec>,
     timing: PttTiming,
     trusdx_speaker: bool,
+    channel: audio::Channel,
     record: Option<PathBuf>,
     log: Option<PathBuf>,
     hf_given: bool,
@@ -100,6 +101,7 @@ fn defaults() -> Args {
         ptt: None,
         timing: PttTiming::default(),
         trusdx_speaker: false,
+        channel: audio::Channel::Both,
         record: None,
         log: None,
         hf_given: false,
@@ -113,6 +115,7 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
     }
     match k {
         "--audio" => a.audio = v()?.parse()?,
+        "--channel" => a.channel = v()?.parse()?,
         "--capture" => a.capture = v()?,
         "--playback" => a.playback = v()?,
         "--tx-buffer-ms" => a.tx_buffer_ms = Some(num(k, &v()?)?),
@@ -241,6 +244,9 @@ fn check(a: &Args) -> Result<(), String> {
         (false, true) => return Err("--ptt trusdx needs --audio trusdx".into()),
         (true, false) if a.radio => return Err("--audio trusdx keys the radio over CAT: use --ptt trusdx".into()),
         _ => {}
+    }
+    if trusdx && a.channel != audio::Channel::Both {
+        return Err("--channel does not apply to --audio trusdx".into());
     }
     if a.trusdx_speaker && !trusdx {
         return Err("--trusdx-speaker needs --audio trusdx".into());
@@ -667,7 +673,8 @@ fn open_audio(
     error: &mut Option<String>,
 ) -> Result<(Args, Box<dyn Audio>), std::io::Error> {
     let devices = |k: &str| k == "capture" || k == "playback";
-    let open = |a: &Args| audio::open(a.audio, &a.capture, &a.playback, a.radio, tx_buffer(a), a.trusdx_speaker);
+    let open =
+        |a: &Args| audio::open(a.audio, &a.capture, &a.playback, a.radio, tx_buffer(a), a.trusdx_speaker, a.channel);
     match open(&a) {
         Ok(io) => Ok((a, io)),
         Err(e) if applied.is_some_and(|s| s.iter().any(|(k, _)| devices(k))) => {
