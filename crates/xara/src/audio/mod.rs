@@ -1,5 +1,7 @@
-#![cfg_attr(not(any(pulse, alsa, coreaudio)), expect(dead_code))]
+#![cfg_attr(not(any(pulse, alsa, coreaudio, windows, target_os = "android")), expect(dead_code))]
 
+#[cfg(target_os = "android")]
+pub mod aaudio;
 #[cfg(alsa)]
 pub mod alsa;
 #[cfg(coreaudio)]
@@ -14,8 +16,11 @@ pub mod ratematch;
 #[cfg(feature = "trusdx")]
 pub mod trusdx;
 pub mod txpath;
+#[cfg(windows)]
+pub mod winmm;
 
-#[cfg(not(any(pulse, alsa, coreaudio, feature = "trusdx")))]
+// On Windows the backend is WinMM (winmm.rs), on Android AAudio (aaudio.rs).
+#[cfg(all(unix, not(target_os = "android"), not(any(pulse, alsa, coreaudio, feature = "trusdx"))))]
 compile_error!("xara needs an audio backend: enable the pulse or alsa feature, or build on macOS for CoreAudio");
 
 use std::collections::VecDeque;
@@ -64,6 +69,7 @@ impl Report {
     }
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))] // aaudio blocks with its own timeout
 fn remaining(until: Instant, what: &str) -> io::Result<Duration> {
     until
         .checked_duration_since(Instant::now())
@@ -171,17 +177,79 @@ pub enum Backend {
     Alsa,
     CoreAudio,
     Trusdx,
+    Winmm,
+    Aaudio,
 }
 
 impl Default for Backend {
     fn default() -> Self {
-        if cfg!(coreaudio) {
+        if cfg!(windows) {
+            Self::Winmm
+        } else if cfg!(target_os = "android") {
+            Self::Aaudio
+        } else if cfg!(coreaudio) {
             Self::CoreAudio
         } else if cfg!(pulse) {
             Self::Pulse
         } else {
             Self::Alsa
         }
+    }
+}
+
+/// Which side of a stereo sound card the radio is on, as VARA's left / right / both setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Channel {
+    /// The device used as mono: the backend mixes capture down and plays on every channel.
+    #[default]
+    Both,
+    Left,
+    Right,
+}
+
+impl Channel {
+    /// The slot in an interleaved stereo frame, or None for mono.
+    pub fn index(self) -> Option<usize> {
+        match self {
+            Self::Both => None,
+            Self::Left => Some(0),
+            Self::Right => Some(1),
+        }
+    }
+
+    /// Frame width to open the device with.
+    pub fn width(self) -> usize {
+        if self == Self::Both { 1 } else { 2 }
+    }
+}
+
+impl std::str::FromStr for Channel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "both" => Ok(Self::Both),
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
+            _ => Err(format!("--channel {s:?}: expected left, right or both")),
+        }
+    }
+}
+
+/// Take one channel out of interleaved stereo.
+pub fn pick(stereo: &[i16], c: Channel) -> impl Iterator<Item = i16> + '_ {
+    let i = c.index().unwrap_or(0);
+    stereo.chunks_exact(c.width()).map(move |f| f[i])
+}
+
+/// Spread mono onto interleaved stereo, silent on the other side.
+pub fn spread(mono: &[i16], c: Channel, out: &mut Vec<i16>) {
+    let w = c.width();
+    out.clear();
+    out.resize(mono.len() * w, 0);
+    let i = c.index().unwrap_or(0);
+    for (f, &v) in out.chunks_exact_mut(w).zip(mono) {
+        f[i] = v;
     }
 }
 
@@ -194,6 +262,8 @@ impl std::str::FromStr for Backend {
             "alsa" => Self::Alsa,
             "coreaudio" => Self::CoreAudio,
             "trusdx" => Self::Trusdx,
+            "winmm" => Self::Winmm,
+            "aaudio" => Self::Aaudio,
             _ => {
                 let built: Vec<_> = Self::ALL.into_iter().filter(|b| b.built()).map(Self::name).collect();
                 return Err(format!("--audio {s:?}: expected {}", crate::cli::either(&built)));
@@ -204,7 +274,7 @@ impl std::str::FromStr for Backend {
 }
 
 impl Backend {
-    const ALL: [Self; 4] = [Self::Pulse, Self::Alsa, Self::CoreAudio, Self::Trusdx];
+    const ALL: [Self; 6] = [Self::Pulse, Self::Alsa, Self::CoreAudio, Self::Trusdx, Self::Winmm, Self::Aaudio];
 
     pub fn built(self) -> bool {
         match self {
@@ -212,6 +282,8 @@ impl Backend {
             Self::Alsa => cfg!(alsa),
             Self::CoreAudio => cfg!(coreaudio),
             Self::Trusdx => cfg!(feature = "trusdx"),
+            Self::Winmm => cfg!(windows),
+            Self::Aaudio => cfg!(target_os = "android"),
         }
     }
 
@@ -221,12 +293,22 @@ impl Backend {
             Self::Alsa => "alsa",
             Self::CoreAudio => "coreaudio",
             Self::Trusdx => "trusdx",
+            Self::Winmm => "winmm",
+            Self::Aaudio => "aaudio",
         }
     }
 }
 
 fn unbuilt_why(b: Backend) -> String {
-    if b == Backend::CoreAudio {
+    if b == Backend::Winmm {
+        "winmm is only available on Windows".into()
+    } else if b == Backend::Aaudio {
+        "aaudio is only available on Android".into()
+    } else if cfg!(target_os = "android") {
+        format!("{} is not available on Android; use aaudio", b.name())
+    } else if cfg!(windows) {
+        format!("{} is not available on Windows; use winmm", b.name())
+    } else if b == Backend::CoreAudio {
         "coreaudio is only available on macOS".into()
     } else if cfg!(target_os = "macos") && b != Backend::Trusdx {
         format!("{} is not available on macOS", b.name())
@@ -239,7 +321,10 @@ fn unbuilt(b: Backend) -> io::Error {
     io::Error::other(unbuilt_why(b))
 }
 
-#[cfg_attr(not(all(feature = "trusdx", any(pulse, alsa, coreaudio))), expect(unused_variables))]
+#[cfg_attr(
+    not(all(feature = "trusdx", any(pulse, alsa, coreaudio, windows, target_os = "android"))),
+    expect(unused_variables)
+)]
 pub fn open(
     b: Backend,
     capture: &str,
@@ -247,21 +332,32 @@ pub fn open(
     radio: bool,
     tx: TxBuffer,
     speaker: bool,
+    ch: Channel,
 ) -> io::Result<Box<dyn Audio>> {
     match b {
         #[cfg(pulse)]
-        Backend::Pulse => Ok(Box::new(pulse::PulseIo::open(capture, playback, radio, tx)?)),
+        Backend::Pulse => Ok(Box::new(pulse::PulseIo::open(capture, playback, radio, tx, ch)?)),
         #[cfg(alsa)]
-        Backend::Alsa => Ok(Box::new(alsa::AlsaIo::open(capture, playback, radio, tx)?)),
+        Backend::Alsa => Ok(Box::new(alsa::AlsaIo::open(capture, playback, radio, tx, ch)?)),
         #[cfg(coreaudio)]
-        Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio, tx)?)),
+        Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio, tx, ch)?)),
+        #[cfg(feature = "trusdx")]
+        Backend::Trusdx if ch != Channel::Both => Err(io::Error::other("--channel does not apply to --audio trusdx")),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open(capture, playback, radio, speaker)?)),
+        #[cfg(windows)]
+        Backend::Winmm => Ok(Box::new(winmm::WinmmIo::open(capture, playback, radio, tx, ch)?)),
+        #[cfg(target_os = "android")]
+        Backend::Aaudio if ch != Channel::Both => {
+            Err(io::Error::other("--channel does not apply to --audio aaudio (mono)"))
+        }
+        #[cfg(target_os = "android")]
+        Backend::Aaudio => Ok(Box::new(aaudio::AaudioIo::open(capture, playback, radio, tx)?)),
         _ => Err(unbuilt(b)),
     }
 }
 
-#[cfg_attr(not(any(pulse, alsa, coreaudio)), expect(unused_variables))]
+#[cfg_attr(not(any(pulse, alsa, coreaudio, windows, target_os = "android")), expect(unused_variables))]
 pub fn check_playback(b: Backend, playback: &str, radio: bool) -> io::Result<()> {
     match b {
         #[cfg(pulse)]
@@ -272,6 +368,10 @@ pub fn check_playback(b: Backend, playback: &str, radio: bool) -> io::Result<()>
         Backend::CoreAudio => coreaudio::check(playback, radio),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => trusdx::check(playback),
+        #[cfg(windows)]
+        Backend::Winmm => winmm::check(playback, radio),
+        #[cfg(target_os = "android")]
+        Backend::Aaudio => aaudio::check_playback(playback, radio),
         _ => Err(unbuilt(b)),
     }
 }
@@ -286,6 +386,10 @@ pub fn list(b: Backend) -> io::Result<(DeviceList, DeviceList)> {
         Backend::CoreAudio => coreaudio::list(),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => trusdx::list(),
+        #[cfg(windows)]
+        Backend::Winmm => winmm::list(),
+        #[cfg(target_os = "android")]
+        Backend::Aaudio => aaudio::list(),
         _ => Err(unbuilt(b)),
     }
 }
@@ -300,6 +404,10 @@ pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
         Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open_capture(capture)?)),
         #[cfg(feature = "trusdx")]
         Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open_capture(capture)?)),
+        #[cfg(windows)]
+        Backend::Winmm => Ok(Box::new(winmm::WinmmIo::open_capture(capture)?)),
+        #[cfg(target_os = "android")]
+        Backend::Aaudio => Ok(Box::new(aaudio::AaudioIo::open_capture(capture)?)),
         _ => Err(unbuilt(b)),
     }
 }
@@ -307,6 +415,23 @@ pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channels_pick_and_spread_one_side() {
+        let st = [1, -1, 2, -2, 3, -3];
+        let got = |c| pick(&st, c).collect::<Vec<_>>();
+        assert_eq!((got(Channel::Left), got(Channel::Right)), (vec![1, 2, 3], vec![-1, -2, -3]));
+        assert_eq!(got(Channel::Both), st);
+        let mut out = Vec::new();
+        spread(&[5, 6], Channel::Right, &mut out);
+        assert_eq!(out, [0, 5, 0, 6]);
+        spread(&[5, 6], Channel::Left, &mut out);
+        assert_eq!(out, [5, 0, 6, 0]);
+        spread(&[5, 6], Channel::Both, &mut out);
+        assert_eq!(out, [5, 6]);
+        assert_eq!("right".parse(), Ok(Channel::Right));
+        assert!("mono".parse::<Channel>().is_err());
+    }
 
     #[test]
     fn samples_convert_at_the_device_boundary() {

@@ -63,10 +63,13 @@ pub struct Digi {
     interval: Time,
     deadline: Option<Time>,
     quitting: bool,
+    /// A Ping is being relayed (no link): CANCELPENDING once it is sent.
+    relaying_ping: bool,
     out: VecDeque<DigiOutput>,
 }
 
-fn snr_in(snr_db: f64, chain: u8) -> u8 {
+/// The S/N byte to pass on: what was heard on this hop, or the chain's weaker hop so far.
+pub(crate) fn snr_in(snr_db: f64, chain: u8) -> u8 {
     let s = snr_db + SNR_OFFSET_DB;
     snr_byte(if chain != 0 { s.min(f64::from(chain) / 7.0) } else { s })
 }
@@ -94,6 +97,7 @@ impl Digi {
             interval: watchdog(1),
             deadline: None,
             quitting: false,
+            relaying_ping: false,
             out: VecDeque::new(),
         }
     }
@@ -150,7 +154,8 @@ impl Digi {
             return false;
         }
         let Some(r) = Record0::parse(bytes) else { return false };
-        if r.kind != Kind::Connect {
+        let relay_only = matches!(r.kind, Kind::Ping | Kind::Reply);
+        if !(r.kind == Kind::Connect || relay_only && !self.active) {
             return false;
         }
         let eq = |a: &str, b: &str| !a.is_empty() && a.eq_ignore_ascii_case(b);
@@ -169,6 +174,21 @@ impl Digi {
         } else {
             return false;
         };
+        if relay_only {
+            // VARA FM relays a Ping and its Reply hop by hop like a Connect (lab, 2026-11-18), with no link after.
+            if r.kind == Kind::Ping {
+                self.relaying_ping = true;
+                self.out.push_back(DigiOutput::Host(HostEvent::Pending));
+            }
+            let fwd = Record0 { hop, chain_snr: snr_in(snr_db, r.chain_snr), ..r };
+            self.out.push_back(DigiOutput::Tx(DigiTx::Data {
+                record: Record::Connect,
+                frame: fwd.restamp(bytes),
+                lead: CONNECT_LEAD_IN,
+                side: Side::Target,
+            }));
+            return true;
+        }
         let h = |c: &str| call_hash(c.as_bytes());
         self.keys = if hop == 1 {
             let next = if r.via2.is_empty() { &r.target } else { &r.via2 };
@@ -284,6 +304,9 @@ impl Digi {
     }
 
     pub fn on_tx_done(&mut self) {
+        if std::mem::take(&mut self.relaying_ping) {
+            self.out.push_back(DigiOutput::Host(HostEvent::CancelPending));
+        }
         if self.quitting {
             self.end(false);
         }
@@ -478,6 +501,36 @@ mod tests {
         assert!(!v2.on_record0(0, &connect("N0CALL", "N2CALL", "N3CALL", "N1CALL", 0), 20.0));
         assert!(v2.on_record0(0, &connect("N0CALL", "N2CALL", "N3CALL", "N1CALL", 1), 20.0));
         assert_eq!((v2.key(Side::Source), v2.key(Side::Target)), (call_hash(b"N3CALL"), call_hash(b"N1CALL")));
+    }
+
+    fn unhex(h: &str) -> Vec<u8> {
+        (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect()
+    }
+
+    /// Real VARA FM 4.4.1 as digipeater N9DIG (lab, 2026-11-18): it relays the Ping and then the Reply, each as
+    /// heard but with the next hop and its S/N, and starts no link. These are its exact frames.
+    #[test]
+    fn relays_a_ping_and_its_reply_like_vara() {
+        let mut d = Digi::new("N9DIG", FmBandwidth::Wide);
+        for (heard, sent) in [
+            (
+                "424e3043414c4c20004e3944494720200020202020202020004e3143414c4c2000000001005189",
+                "4a4e3043414c4c20004e3944494720200020202020202020004e3143414c4c2000000001f53c8c",
+            ),
+            (
+                "624e3143414c4c20004e3944494720200020202020202020004e3043414c4c2000f5000100b762",
+                "6a4e3143414c4c20004e3944494720200020202020202020004e3043414c4c2000f50001f5da67",
+            ),
+        ] {
+            assert!(d.on_record0(0, &unhex(heard), 40.0));
+            let o = drain(&mut d);
+            let DigiTx::Data { record: Record::Connect, frame, .. } = &txs(&o)[0] else { panic!("{o:?}") };
+            assert_eq!(*frame, unhex(sent));
+            assert!(!d.active());
+            d.on_tx_done();
+            let cancel = drain(&mut d).contains(&DigiOutput::Host(HostEvent::CancelPending));
+            assert_eq!(cancel, o.contains(&DigiOutput::Host(HostEvent::Pending)));
+        }
     }
 
     #[test]

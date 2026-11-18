@@ -23,7 +23,8 @@ pub(crate) const MAX_PENDING: usize = 32;
 const MAX_REQUEST: usize = 8192;
 const MAX_FRAME: usize = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const KEEPALIVE_TICKS: u32 = 20;
+// Timed by the clock, not by counting ticks: a late tick (busy or throttled host) must not stretch it.
+const KEEPALIVE: Duration = Duration::from_secs(2);
 pub const WS_IDLE: Duration = Duration::from_secs(6);
 pub const TOKEN_FILE: &str = "ui-token";
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
@@ -53,6 +54,10 @@ pub(crate) const MODEM: Pages = Pages {
     style: include_str!("../web/style.css"),
 };
 
+const CHAT_INDEX: &str = include_str!("../web/chat/index.html");
+const CHAT_JS: &str = include_str!("../web/chat/app.js");
+const CHAT_CSS: &str = include_str!("../web/chat/style.css");
+
 pub const MONITOR: Pages = Pages {
     name: "xara-monitor",
     index: include_str!("../web/monitor/index.html"),
@@ -72,6 +77,8 @@ pub struct Access {
     pub token: Option<String>,
     pub hosts: Vec<String>,
     pub settings: Option<Arc<Settings>>,
+    /// The TNC's host ports, for the chat page (`/chat`); `None` hides it.
+    pub chat: Option<crate::chat::HostPorts>,
 }
 
 struct Ctx {
@@ -79,6 +86,7 @@ struct Ctx {
     cookie: String,
     pages: Pages,
     open: [Arc<AtomicUsize>; 2],
+    chatting: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -217,13 +225,14 @@ fn serve(
     }
     let cookie = format!("xara_token_{}", local.port());
     let open = [Arc::default(), Arc::default()];
-    let ctx = Arc::new(Ctx { access, cookie, pages, open });
+    let ctx = Arc::new(Ctx { access, cookie, pages, open, chatting: Arc::default() });
     let (tx, rx) = channel();
     thread::Builder::new().name("ui-hub".into()).spawn(move || hub(src, controls, info, rx))?;
     thread::Builder::new().name("ui-accept".into()).spawn(move || accept(l, tx, ctx))?;
     Ok(UiServer { addr: local })
 }
 
+#[cfg(unix)]
 fn hostname() -> Option<String> {
     let mut b = [0u8; 256];
     // SAFETY: b is valid for its length; gethostname writes at most that many bytes.
@@ -235,9 +244,48 @@ fn hostname() -> Option<String> {
     (!h.is_empty()).then(|| h.to_string())
 }
 
+#[cfg(not(unix))]
+fn hostname() -> Option<String> {
+    // Windows exposes the machine name in the environment.
+    let h = std::env::var("COMPUTERNAME").ok()?;
+    let h = h.trim();
+    (!h.is_empty()).then(|| h.to_string())
+}
+
+/// Fill `buf` with cryptographically secure random bytes from the OS.
+#[cfg(unix)]
+fn fill_random(buf: &mut [u8]) -> io::Result<()> {
+    std::fs::File::open("/dev/urandom")?.read_exact(buf)
+}
+
+#[cfg(not(unix))]
+fn fill_random(buf: &mut [u8]) -> io::Result<()> {
+    // Windows CSPRNG: BCryptGenRandom with the system-preferred RNG (no algorithm
+    // handle needed). The modern successor to /dev/urandom and RtlGenRandom.
+    #[link(name = "bcrypt")]
+    unsafe extern "system" {
+        fn BCryptGenRandom(
+            h_algorithm: *mut core::ffi::c_void,
+            pb_buffer: *mut u8,
+            cb_buffer: u32,
+            dw_flags: u32,
+        ) -> i32;
+    }
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+    if buf.is_empty() {
+        return Ok(());
+    }
+    // SAFETY: buf is valid for cb_buffer bytes; a null algorithm handle is allowed
+    // with BCRYPT_USE_SYSTEM_PREFERRED_RNG.
+    let status = unsafe {
+        BCryptGenRandom(core::ptr::null_mut(), buf.as_mut_ptr(), buf.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
+    };
+    if status == 0 { Ok(()) } else { Err(io::Error::other(format!("BCryptGenRandom failed: {status:#010x}"))) }
+}
+
 pub fn new_token() -> io::Result<String> {
     let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+    fill_random(&mut b)?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
@@ -245,14 +293,40 @@ pub fn valid_token(t: &str) -> bool {
     (8..=128).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// Re-tighten an existing token file to owner-only (Unix). On Windows the file's
+/// protection comes from the per-user config directory's ACLs, so this is a no-op.
+#[cfg(unix)]
+fn harden_token(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if std::fs::metadata(path)?.permissions().mode() & 0o077 != 0 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn harden_token(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+/// Create the token temp file. Unix opens it 0600; Windows relies on the
+/// per-user config directory's ACLs (there is no portable mode bit).
+#[cfg(unix)]
+fn create_token_file(tmp: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(tmp)
+}
+
+#[cfg(not(unix))]
+fn create_token_file(tmp: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)
+}
+
 pub fn stored_token(dir: &Path) -> io::Result<String> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let path = dir.join(TOKEN_FILE);
     match std::fs::read_to_string(&path) {
         Ok(t) if valid_token(t.trim()) => {
-            if std::fs::metadata(&path)?.permissions().mode() & 0o077 != 0 {
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-            }
+            harden_token(&path)?;
             return Ok(t.trim().to_string());
         }
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
@@ -264,7 +338,7 @@ pub fn stored_token(dir: &Path) -> io::Result<String> {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut f = create_token_file(&tmp)?;
     writeln!(f, "{t}")?;
     f.sync_all()?;
     std::fs::rename(&tmp, &path)?;
@@ -308,7 +382,7 @@ fn hub(mut src: impl Source, mut controls: Option<Box<dyn Controls>>, info: Info
     let mut history: VecDeque<String> = VecDeque::new();
     let mut audio = Audio { wf: Waterfall::new(info.span_hz), wanted: false, rows: Vec::new() };
     let mut next = Instant::now() + TICK;
-    let mut ticks = 0u32;
+    let mut pinged = Instant::now();
     loop {
         match msgs.recv_timeout(next.saturating_duration_since(Instant::now())) {
             Ok(Msg::Waterfall(id, on)) => {
@@ -368,11 +442,14 @@ fn hub(mut src: impl Source, mut controls: Option<Box<dyn Controls>>, info: Info
         history.drain(..excess);
         batch.extend(src.status());
         let rows = audio.frames(&mut src);
-        ticks = (ticks + 1) % KEEPALIVE_TICKS;
+        let ping = now.duration_since(pinged) >= KEEPALIVE;
+        if ping {
+            pinged = now;
+        }
         let (kept, gone) = clients.into_iter().partition(|c| {
             batch.iter().all(|m| c.send(m))
                 && (!c.waterfall || rows.iter().all(|r| c.send_binary(r)))
-                && (ticks != 0 || c.ping())
+                && (!ping || c.ping())
         });
         clients = kept;
         gone.iter().for_each(|c| c.w.close());
@@ -485,6 +562,16 @@ fn route(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> io::R
         "/common.js" => respond(&mut s, "200 OK", "text/javascript; charset=utf-8", COMMON_JS.as_bytes()),
         "/common.css" => respond(&mut s, "200 OK", "text/css; charset=utf-8", COMMON_CSS.as_bytes()),
         "/ws" => websocket(s, r, joins, ctx),
+        "/chat" | "/chat/" if ctx.access.chat.is_some() => {
+            respond(&mut s, "200 OK", "text/html; charset=utf-8", CHAT_INDEX.as_bytes())
+        }
+        "/chat.js" if ctx.access.chat.is_some() => {
+            respond(&mut s, "200 OK", "text/javascript; charset=utf-8", CHAT_JS.as_bytes())
+        }
+        "/chat.css" if ctx.access.chat.is_some() => {
+            respond(&mut s, "200 OK", "text/css; charset=utf-8", CHAT_CSS.as_bytes())
+        }
+        "/chat/ws" => chat_websocket(s, r, ctx),
         "/stream" => stream(s, joins, ctx),
         _ => respond(&mut s, "404 Not Found", "text/plain", b"not found\n"),
     }
@@ -672,6 +759,40 @@ fn websocket(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> i
     } else {
         w.close()
     }
+    Ok(())
+}
+
+/// The chat page's websocket, bridged to the TNC's host ports (see `chat`).  It can key the
+/// transmitter, so it needs the control token like the page's other controls; one at a time.
+fn chat_websocket(mut s: TcpStream, r: &Request, ctx: &Ctx) -> io::Result<()> {
+    let Some(ports) = ctx.access.chat else {
+        return respond(&mut s, "404 Not Found", "text/plain", b"not found\n");
+    };
+    let upgrade = r.header("upgrade").is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+    let (Some(key), true, Some("13")) = (r.header("sec-websocket-key"), upgrade, r.header("sec-websocket-version"))
+    else {
+        return respond(&mut s, "400 Bad Request", "text/plain", b"websocket upgrade required\n");
+    };
+    if !same_origin(r) {
+        return respond(&mut s, "403 Forbidden", "text/plain", b"cross-origin websocket refused\n");
+    }
+    if !authorized(r, ctx) {
+        return respond(&mut s, "403 Forbidden", "text/plain", b"the chat page needs --ui-control and the UI token\n");
+    }
+    let Some(_permit) = Permit::take(&ctx.chatting, 1) else {
+        return respond(&mut s, "503 Service Unavailable", "text/plain", b"a chat page is already open\n");
+    };
+    write!(
+        s,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
+        ws::accept_key(key)
+    )?;
+    // as on /ws: a page that stops answering pings (asleep, off wifi) frees the one chat slot
+    s.set_read_timeout(Some(WS_IDLE))?;
+    let _ = s.set_nodelay(true);
+    let w = Arc::new(Writer::spawn(&s)?);
+    crate::chat::serve(s, w.clone(), ports);
+    w.finish();
     Ok(())
 }
 

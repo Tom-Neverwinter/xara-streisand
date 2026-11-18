@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>xara monitor</title>
+<script>try{var t=localStorage.getItem("xara.theme");if(t&&t!=="system")document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="common.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -12,6 +13,13 @@
 <header>
   <div class="brand">xara monitor <span id="mode" class="dim"></span></div>
   <div id="calls" class="calls"></div>
+  <select id="theme" class="theme" title="Display theme" aria-label="Display theme">
+    <option value="system">System</option>
+    <option value="sodium">Sodium lamp</option>
+    <option value="nixie">Nixie tube</option>
+    <option value="airport">Airport board</option>
+    <option value="deco">Art deco</option>
+  </select>
   <div id="conn" class="conn">connecting</div>
 </header>
 <main>
@@ -41,6 +49,7 @@
       <span class="val">-</span>
     </div>
     <div class="scale"></div>
+    <pre id="ascii" class="ascii" aria-hidden="true"></pre>
   </section>
   <section class="card wf">
     <div class="card-head">

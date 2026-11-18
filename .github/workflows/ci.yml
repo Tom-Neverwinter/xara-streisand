@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,8 +20,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpulse-dev libasound2-dev
       - run: rustup toolchain install "$RUST" --profile minimal --component rustfmt,clippy
       - run: cargo +"$RUST" fmt --all --check
+      # main.rs include!s tnc_main.rs, and cargo fmt only follows `mod`.
+      - run: rustfmt +"$RUST" --edition 2024 --check crates/xara/src/tnc_main.rs
       - run: cargo +"$RUST" clippy --locked --workspace --all-targets -- -D warnings
-      - run: cargo +"$RUST" clippy --locked -p xara --all-targets --features registered -- -D warnings
       - run: cargo +"$RUST" clippy --locked -p xara --all-targets --no-default-features --features pulse -- -D warnings
       - run: cargo +"$RUST" clippy --locked -p xara --all-targets --no-default-features --features alsa -- -D warnings
       - run: cargo +"$RUST" test --locked --release --workspace
@@ -50,6 +52,16 @@ jobs:
       - run: cargo +"$RUST" clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo +"$RUST" test --locked --release --workspace
 
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: echo "RUST=$(cat .rust-version)" >> "$GITHUB_ENV"
+      - run: rustup toolchain install "$env:RUST" --profile minimal --component clippy
+      - run: cargo +"$env:RUST" clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo +"$env:RUST" test --locked --release --workspace
+
   freebsd:
     runs-on: ubuntu-24.04
     env:
@@ -60,6 +72,37 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev
       - run: rustup toolchain install "$RUST" --profile minimal --component clippy --target x86_64-unknown-freebsd
       - run: cargo +"$RUST" clippy --locked --workspace --all-targets --target x86_64-unknown-freebsd -- -D warnings
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "RUST=$(cat .rust-version)" >> "$GITHUB_ENV"
+      - run: >-
+          rustup toolchain install "$RUST" --profile minimal
+          --target aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      # The headless modem (KISS/TCP TNC + web UI, no local audio) must keep
+      # compiling for Android. `check` does not link, so no NDK is needed here.
+      - name: headless modem compiles for Android
+        run: |
+          for t in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            cargo +"$RUST" check --locked --no-default-features -p xara -p xara-ui --target "$t"
+          done
+      # A linked arm64 build with AAudio, against the NDK the runner image ships (API 26: AAudio's minimum).
+      - name: linked arm64 build (NDK, AAudio)
+        run: |
+          # ANDROID_NDK_LATEST_HOME is a runner shell variable, not a workflow env one
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          cc="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+          test -x "$cc"
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$cc" cargo +"$RUST" build --locked --release --no-default-features -p xara --target aarch64-linux-android
+          file target/aarch64-linux-android/release/xara
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xara-aarch64-linux-android
+          path: |
+            target/aarch64-linux-android/release/xara
+            target/aarch64-linux-android/release/xara-monitor
 
   msrv:
     runs-on: ubuntu-24.04

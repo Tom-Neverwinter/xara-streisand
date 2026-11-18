@@ -1,4 +1,5 @@
 .state { font-size: 26px; }
+.navlink { color: var(--accent); font-size: 13px; text-decoration: none; }
 .state.calling { color: var(--warn); }
 .peer { font-family: var(--mono); font-size: 20px; }
 .led.ptt.on { background: var(--bad); color: #fff; }

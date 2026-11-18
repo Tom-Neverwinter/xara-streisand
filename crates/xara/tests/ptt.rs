@@ -1,3 +1,7 @@
+// Exercises the TNC and PTT, which are Unix-only (see the crate root). The web
+// UI is cross-platform now, but its monitor arg-parse cases ride along here.
+#![cfg(unix)]
+
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::{Command, Stdio};
@@ -163,6 +167,10 @@ fn rigctld_protocol() {
     r.set(true).unwrap();
     r.set(false).unwrap();
     assert_eq!(*log.lock().unwrap(), ["T 0", "T 1", "T 0"]);
+
+    let (addr, log) = fake_rigctld("RPRT 0");
+    Rigctld::open(&addr).unwrap().set_frequency(14_105_000).unwrap();
+    assert_eq!(*log.lock().unwrap(), ["T 0", "F 14105000"]);
 
     let (addr, _) = fake_rigctld("RPRT -11");
     let mut r = Rigctld::open(&addr).unwrap();
@@ -621,7 +629,7 @@ fn parsed(src: &str) -> Vec<String> {
 fn help_lists_exactly_the_parsed_options() {
     let ui = parsed(include_str!("../src/cli.rs"));
     for (bin, src) in [
-        (env!("CARGO_BIN_EXE_xara"), include_str!("../src/main.rs")),
+        (env!("CARGO_BIN_EXE_xara"), include_str!("../src/tnc_main.rs")),
         (env!("CARGO_BIN_EXE_xara-monitor"), include_str!("../src/bin/xara-monitor.rs")),
     ] {
         let (_, help, _) = run(bin, &["--help"]);
@@ -669,6 +677,15 @@ fn bad_option_values_are_refused() {
         let (c, _, e) = monitor(&["--stdin", rate]);
         assert_eq!(c, 2, "{rate}: {e}");
         assert!(e.contains("--stdin: sample rate"), "{rate}: {e}");
+    }
+    for (extra, want) in [
+        (&["--fm", "sideways"][..], "--fm: expected narrow or wide"),
+        (&["--fm", "narrow", "--hf", "2300"], "--hf and --fm cannot both be given"),
+        (&["--hf", "500", "--fm", "wide"], "--hf and --fm cannot both be given"),
+    ] {
+        let (c, _, e) = monitor(&[&["--stdin", "48000"][..], extra].concat());
+        assert_eq!(c, 2, "{extra:?}: {e}");
+        assert!(e.contains(want), "{extra:?}: {e}");
     }
 }
 

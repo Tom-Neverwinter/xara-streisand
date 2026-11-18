@@ -55,6 +55,12 @@ along with KISS for applications such as Pat. See the README for full details.
     Without **--radio**, it must be a Pulse null sink, the ALSA **null** PCM,
     or a virtual CoreAudio device such as BlackHole.
 
+**--channel** left|right|both
+
+:   Which side of a stereo sound card the radio is on, as VARA's channel
+    setting. Default **both**: the device is used as mono. Not for
+    **--audio trusdx**.
+
 **--tx-buffer-ms** *N*
 
 :   Transmit audio queued ahead of the sound card, in ms. 30-500 (default 40).
@@ -164,8 +170,17 @@ along with KISS for applications such as Pat. See the README for full details.
 
 :   Release PTT after *N* seconds max, 1-120 (default 30).
 
+**--unregistered**
+:   Cap the link at unregistered VARA speeds (default: full speed)
+
 **--registered**
-:   Enable registered speeds (must set build flag)
+:   No-op, kept so old configs still work
+
+**--offer-level** *N*
+:   HF: offer speed level N at link start instead of picking from S/N
+
+**--tuner-enhancement**
+:   HF gateway: let callers' first 2 connect requests pass, so an ATU can tune
 
 **-h**, **--help**, **-V**, **--version**
 
@@ -256,4 +271,4 @@ If you kill with SIGKILL, PTT may not be released!
 
 **xara-monitor**(1), **rigctld**(1), **pactl**(1), **aplay**(1)
 
-README.md in the xara source, https://github.com/x0rro/xara
+README.md in the xara source, https://github.com/Tom-Neverwinter/xara-streisand

@@ -22,6 +22,11 @@
 #     systemctl --user enable --now xara
 #
 # on macOS, use dist/launchd/xara.plist instead
+#
+# on Windows, save this file as %APPDATA%\xara\xara.conf (xara run by hand
+# reads it too) and start xara at logon with:
+#
+#     powershell -ExecutionPolicy Bypass -File dist\windows\xara-task.ps1 -Exe C:\path\to\xara.exe -StartNow
 
 ###
 # set your call

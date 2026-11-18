@@ -5,9 +5,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::thread;
 
+#[cfg(target_os = "android")]
+use libc::__errno as errno_location;
 #[cfg(target_os = "linux")]
 use libc::__errno_location as errno_location;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 use libc::__error as errno_location;
 
 static PIPE: AtomicI32 = AtomicI32::new(-1);

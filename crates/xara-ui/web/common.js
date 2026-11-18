@@ -27,6 +27,26 @@ const pref = {
   },
 };
 
+// Display theme: "system" (follow the OS), "sodium" or "nixie". A tiny inline
+// script in <head> applies it before paint; this keeps it in sync with the picker.
+function initTheme() {
+  const saved = pref.get("xara.theme", "system");
+  const root = document.documentElement;
+  if (saved === "system") delete root.dataset.theme;
+  else root.dataset.theme = saved;
+  const sel = $("theme");
+  if (!sel) return;
+  sel.value = saved;
+  sel.addEventListener("change", () => {
+    const v = sel.value;
+    if (v === "system") delete root.dataset.theme;
+    else root.dataset.theme = v;
+    pref.set("xara.theme", v);
+    window.dispatchEvent(new Event("themechange"));
+  });
+}
+initTheme();
+
 function setConn(text, cls) {
   const c = $("conn");
   c.textContent = text;
