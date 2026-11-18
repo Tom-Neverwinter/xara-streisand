@@ -18,12 +18,14 @@ pub const DATA: u8 = 0;
 pub const KISS: u8 = 1;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FRAME: usize = 64 * 1024;
+const KEEPALIVE: Duration = Duration::from_secs(2);
 
-/// Where the bridge finds the TNC: its command address (data port = command port + 1) and KISS port.
+/// Where the bridge finds the TNC: the addresses its host ports are actually bound to.
 #[derive(Clone, Copy, Debug)]
 pub struct HostPorts {
     pub cmd: SocketAddr,
-    pub kiss: Option<u16>,
+    pub data: SocketAddr,
+    pub kiss: Option<SocketAddr>,
 }
 
 /// Host commands the page may send: the connection and station commands from VARA's published TCP
@@ -66,6 +68,10 @@ fn pump(mut from: TcpStream, w: Arc<Writer>, chan: Option<u8>) {
         }
     }
     let _ = w.send(&ws::frame(ws::TEXT, b"E TNC connection closed"));
+    if chan.is_none() {
+        // the command port is the session: end the websocket so the page reconnects
+        w.finish();
+    }
 }
 
 fn open(addr: SocketAddr) -> io::Result<TcpStream> {
@@ -77,13 +83,12 @@ fn open(addr: SocketAddr) -> io::Result<TcpStream> {
 /// Serve one chat page: `s` is the upgraded websocket, `w` its writer.  Returns when either side closes.
 pub(crate) fn serve(mut s: TcpStream, w: Arc<Writer>, ports: HostPorts) {
     let say = |t: String| w.send(&ws::frame(ws::TEXT, t.as_bytes()));
-    let data_addr = SocketAddr::new(ports.cmd.ip(), ports.cmd.port() + 1);
-    let links = (open(ports.cmd), open(data_addr));
+    let links = (open(ports.cmd), open(ports.data));
     let (Ok(cmd), Ok(data)) = links else {
         say(format!("E cannot reach the TNC at {}: is another client connected?", ports.cmd));
         return;
     };
-    let kiss = ports.kiss.and_then(|p| open(SocketAddr::new(ports.cmd.ip(), p)).ok());
+    let kiss = ports.kiss.and_then(|k| open(k).ok());
     let mut socks = vec![(cmd.try_clone(), None), (data.try_clone(), Some(DATA))];
     if let Some(k) = &kiss {
         socks.push((k.try_clone(), Some(KISS)));
@@ -93,6 +98,13 @@ pub(crate) fn serve(mut s: TcpStream, w: Arc<Writer>, ports: HostPorts) {
         let _ = thread::Builder::new().name("ui-chat".into()).spawn(move || pump(sock, w, chan));
     }
     say(format!("E connected to the TNC at {}{}", ports.cmd, if kiss.is_some() { " (with KISS)" } else { "" }));
+    // the page only speaks when typed at; pings make its browser answer inside the read timeout
+    let pinger = w.clone();
+    let _ = thread::Builder::new().name("ui-chat-ping".into()).spawn(move || {
+        while pinger.send(&ws::frame(ws::PING, b"")) {
+            thread::sleep(KEEPALIVE);
+        }
+    });
     let (mut cmd_w, mut data_w) = (cmd.try_clone().ok(), data.try_clone().ok());
     let mut kiss_w = kiss.as_ref().and_then(|k| k.try_clone().ok());
     let mut rd = ws::Reader::default();
@@ -140,26 +152,24 @@ mod tests {
     }
 
     /// An unmasked server frame; payloads < 126 bytes.
+    /// The next server frame other than a keepalive ping.
     fn read_server_frame(r: &mut impl Read) -> (u8, Vec<u8>) {
-        let mut h = [0u8; 2];
-        r.read_exact(&mut h).unwrap();
-        let mut p = vec![0u8; usize::from(h[1] & 0x7f)];
-        r.read_exact(&mut p).unwrap();
-        (h[0] & 0x0f, p)
+        loop {
+            let mut h = [0u8; 2];
+            r.read_exact(&mut h).unwrap();
+            let mut p = vec![0u8; usize::from(h[1] & 0x7f)];
+            r.read_exact(&mut p).unwrap();
+            if h[0] & 0x0f != ws::PING {
+                return (h[0] & 0x0f, p);
+            }
+        }
     }
 
     #[test]
     fn bridges_commands_replies_and_data_to_the_tnc_ports() {
-        // a fake TNC: command port P, data port P+1
-        let cmd = (0..50)
-            .find_map(|_| {
-                let c = TcpListener::bind("127.0.0.1:0").ok()?;
-                let p = c.local_addr().ok()?.port();
-                TcpListener::bind(("127.0.0.1", p + 1)).ok().map(|d| (c, d))
-            })
-            .unwrap();
-        let (cmd_l, data_l) = cmd;
-        let ports = HostPorts { cmd: cmd_l.local_addr().unwrap(), kiss: None };
+        // a fake TNC: its command and data ports
+        let (cmd_l, data_l) = (TcpListener::bind("127.0.0.1:0").unwrap(), TcpListener::bind("127.0.0.1:0").unwrap());
+        let ports = HostPorts { cmd: cmd_l.local_addr().unwrap(), data: data_l.local_addr().unwrap(), kiss: None };
         let ws_l = TcpListener::bind("127.0.0.1:0").unwrap();
         let ws_addr = ws_l.local_addr().unwrap();
         thread::spawn(move || {
@@ -190,6 +200,16 @@ mod tests {
         assert_eq!(read_server_frame(&mut page), (ws::TEXT, b"R CONNECTED N0CALL N1CALL 2300".to_vec()));
         tnc_data.write_all(b"hi back").unwrap();
         assert_eq!(read_server_frame(&mut page), (ws::BINARY, b"\x00hi back".to_vec()));
+
+        // the TNC hangs up: the page is told, then its websocket ends so it reconnects
+        drop(tnc_cmd);
+        assert_eq!(read_server_frame(&mut page).1, b"E TNC connection closed");
+        page.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut rest = Vec::new();
+        let ended = page
+            .read_to_end(&mut rest)
+            .map_or_else(|e| e.kind() != io::ErrorKind::WouldBlock && e.kind() != io::ErrorKind::TimedOut, |_| true);
+        assert!(ended, "websocket still open after the TNC closed");
     }
 
     #[test]

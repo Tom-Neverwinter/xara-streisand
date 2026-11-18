@@ -762,62 +762,29 @@ fn websocket(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> i
 /// transmitter, so it needs the control token like the page's other controls; one at a time.
 fn chat_websocket(mut s: TcpStream, r: &Request, ctx: &Ctx) -> io::Result<()> {
     let Some(ports) = ctx.access.chat else {
-        return respond(
-            &mut s,
-            "404 Not Found",
-            "text/plain",
-            b"not found
-",
-        );
+        return respond(&mut s, "404 Not Found", "text/plain", b"not found\n");
     };
     let upgrade = r.header("upgrade").is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
     let (Some(key), true, Some("13")) = (r.header("sec-websocket-key"), upgrade, r.header("sec-websocket-version"))
     else {
-        return respond(
-            &mut s,
-            "400 Bad Request",
-            "text/plain",
-            b"websocket upgrade required
-",
-        );
+        return respond(&mut s, "400 Bad Request", "text/plain", b"websocket upgrade required\n");
     };
     if !same_origin(r) {
-        return respond(
-            &mut s,
-            "403 Forbidden",
-            "text/plain",
-            b"cross-origin websocket refused
-",
-        );
+        return respond(&mut s, "403 Forbidden", "text/plain", b"cross-origin websocket refused\n");
     }
     if !authorized(r, ctx) {
-        return respond(
-            &mut s,
-            "403 Forbidden",
-            "text/plain",
-            b"the chat page needs --ui-control and the UI token
-",
-        );
+        return respond(&mut s, "403 Forbidden", "text/plain", b"the chat page needs --ui-control and the UI token\n");
     }
     let Some(_permit) = Permit::take(&ctx.chatting, 1) else {
-        return respond(
-            &mut s,
-            "503 Service Unavailable",
-            "text/plain",
-            b"a chat page is already open
-",
-        );
+        return respond(&mut s, "503 Service Unavailable", "text/plain", b"a chat page is already open\n");
     };
     write!(
         s,
-        "HTTP/1.1 101 Switching Protocols
-Upgrade: websocket
-Connection: Upgrade
-Sec-WebSocket-Accept: {}
-
-",
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
         ws::accept_key(key)
     )?;
+    // as on /ws: a page that stops answering pings (asleep, off wifi) frees the one chat slot
+    s.set_read_timeout(Some(WS_IDLE))?;
     let _ = s.set_nodelay(true);
     let w = Arc::new(Writer::spawn(&s)?);
     crate::chat::serve(s, w.clone(), ports);
