@@ -111,3 +111,37 @@ fn hex_ping() -> Vec<u8> {
     let h = "424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d";
     (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect()
 }
+
+/// VARA FM's Autotune: stay quiet through the ten louder-and-louder records, then reply with the first step heard.
+#[test]
+fn autotune_replies_with_the_first_step_heard() {
+    use xara_phy::fm::frame::{Kind, Record0};
+    let mut s = fm::Session::new(fm::Config::new(FmBandwidth::Wide, "N1CALL"));
+    drain(&mut s);
+    let step = |n: u8| {
+        let r = Record0 {
+            kind: Kind::AutoTune,
+            snr: n,
+            control: 1,
+            ..Record0::connect("N0CALL", "N1CALL", "", "", false, true)
+        };
+        r.to_bytes().unwrap()
+    };
+    let mut out = Vec::new();
+    for n in 3..=10 {
+        s.on_record0(i64::from(n) * SECOND, &step(n), 20.0);
+        out.extend(drain(&mut s));
+    }
+    let pending = out.iter().filter(|o| matches!(o, fm::Output::Host(HostEvent::Pending))).count();
+    let replies: Vec<Vec<u8>> = out
+        .iter()
+        .filter_map(
+            |o| if let fm::Output::Tx(fm::Tx::Data { frames, .. }) = o { Some(frames[0].clone()) } else { None },
+        )
+        .collect();
+    assert_eq!((pending, replies.len()), (1, 1), "{out:?}");
+    let r = Record0::parse(&replies[0]).unwrap();
+    assert_eq!((r.kind, r.tune_step, r.target.as_str()), (Kind::Reply, 3, "N0CALL"));
+    s.on_tx_done(11 * SECOND);
+    assert!(drain(&mut s).iter().any(|o| matches!(o, fm::Output::Host(HostEvent::CancelPending))));
+}

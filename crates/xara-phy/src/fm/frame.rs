@@ -147,8 +147,12 @@ pub struct Record0 {
     pub via1: String,
     pub via2: String,
     pub target: String,
-    /// Byte 33: in a Reply, the S/N (`snr_byte`) the answering station heard the Ping at.
+    /// Byte 33: in a Reply, the S/N (`snr_byte`) the answering station heard the Ping at; in an AutoTune, the
+    /// step (1..=10, each louder than the last).
     pub snr: u8,
+    /// High nibble of byte 34 in a Reply to AutoTune: the step the answering station chose, 0 = nothing heard
+    /// (VARA FM shows "NO SIGNAL"). VARA FM turns it into a drive level on the calling side.
+    pub tune_step: u8,
     pub aes: bool,
     pub compression: u8,
     pub control: u8,
@@ -205,6 +209,11 @@ impl Record0 {
         }
     }
 
+    /// The answer to an AutoTune: a Ping reply that also names the chosen step.
+    pub fn tune_reply(source: &str, target: &str, wide: bool, snr: u8, step: u8) -> Self {
+        Self { tune_step: step, ..Self::ping_reply(source, target, wide, snr) }
+    }
+
     pub fn vias(&self) -> usize {
         usize::from(!self.via1.is_empty()) + usize::from(!self.via2.is_empty())
     }
@@ -214,6 +223,9 @@ impl Record0 {
     }
 
     fn flags(&self, comp: u8) -> u8 {
+        if self.kind == Kind::Reply {
+            return self.tune_step << 4;
+        }
         // Bit 3 is set in connects only; VARA FM's Ping and Reply records carry flags 0.
         let connect = if self.kind == Kind::Connect { 0x08 } else { 0 };
         u8::from(self.aes) << 6 | connect | (comp & 3) << 1
@@ -242,8 +254,11 @@ impl Record0 {
             return None;
         }
         let call = |i: usize| parse_call(&f[1 + 8 * i..9 + 8 * i]);
+        let kind = [Kind::Connect, Kind::AutoTune, Kind::Ping, Kind::Reply][usize::from((f[0] >> 5) & 3)];
+        // In a Reply, byte 34 holds the AutoTune step instead of flags.
+        let flags = if kind == Kind::Reply { 0 } else { f[34] };
         Some(Self {
-            kind: [Kind::Connect, Kind::AutoTune, Kind::Ping, Kind::Reply][usize::from((f[0] >> 5) & 3)],
+            kind,
             hop: (f[0] >> 3) & 3,
             registered: f[0] & 4 != 0,
             wide: f[0] & 2 != 0,
@@ -252,8 +267,9 @@ impl Record0 {
             via2: call(2),
             target: call(3),
             snr: f[33],
-            aes: f[34] & 0x40 != 0,
-            compression: (f[34] >> 1) & 3,
+            tune_step: if kind == Kind::Reply { f[34] >> 4 } else { 0 },
+            aes: flags & 0x40 != 0,
+            compression: (flags >> 1) & 3,
             control: f[35],
             chain_snr: f[36],
         })
