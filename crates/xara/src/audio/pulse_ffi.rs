@@ -317,13 +317,21 @@ struct Collect<T, F> {
 }
 
 extern "C" fn item<T, F: FnMut(&T)>(_: *mut Raw, i: *const T, eol: c_int, userdata: *mut c_void) {
-    // SAFETY: userdata is the Collect that the List owning the operation keeps alive until it is done or cancelled.
-    let c = unsafe { &mut *userdata.cast::<Collect<T, F>>() };
-    if eol < 0 {
-        c.failed = true;
-    } else if eol == 0 && !i.is_null() {
-        // SAFETY: libpulse lends a valid item for the duration of the callback.
-        (c.f)(unsafe { &*i });
+    // A panic in the user closure must not unwind across this extern "C"
+    // boundary — that aborts the process. Contain it; the list is marked failed.
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: userdata is the Collect that the List owning the operation keeps alive until it is done or cancelled.
+        let c = unsafe { &mut *userdata.cast::<Collect<T, F>>() };
+        if eol < 0 {
+            c.failed = true;
+        } else if eol == 0 && !i.is_null() {
+            // SAFETY: libpulse lends a valid item for the duration of the callback.
+            (c.f)(unsafe { &*i });
+        }
+    }));
+    if caught.is_err() {
+        // SAFETY: same Collect; flag the operation as failed so the caller does not trust partial results.
+        unsafe { &mut *userdata.cast::<Collect<T, F>>() }.failed = true;
     }
 }
 
