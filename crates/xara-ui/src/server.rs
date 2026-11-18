@@ -23,7 +23,8 @@ pub(crate) const MAX_PENDING: usize = 32;
 const MAX_REQUEST: usize = 8192;
 const MAX_FRAME: usize = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const KEEPALIVE_TICKS: u32 = 20;
+// Timed by the clock, not by counting ticks: a late tick (busy or throttled host) must not stretch it.
+const KEEPALIVE: Duration = Duration::from_secs(2);
 pub const WS_IDLE: Duration = Duration::from_secs(6);
 pub const TOKEN_FILE: &str = "ui-token";
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
@@ -53,6 +54,10 @@ pub(crate) const MODEM: Pages = Pages {
     style: include_str!("../web/style.css"),
 };
 
+const CHAT_INDEX: &str = include_str!("../web/chat/index.html");
+const CHAT_JS: &str = include_str!("../web/chat/app.js");
+const CHAT_CSS: &str = include_str!("../web/chat/style.css");
+
 pub const MONITOR: Pages = Pages {
     name: "xara-monitor",
     index: include_str!("../web/monitor/index.html"),
@@ -72,6 +77,8 @@ pub struct Access {
     pub token: Option<String>,
     pub hosts: Vec<String>,
     pub settings: Option<Arc<Settings>>,
+    /// The TNC's host ports, for the chat page (`/chat`); `None` hides it.
+    pub chat: Option<crate::chat::HostPorts>,
 }
 
 struct Ctx {
@@ -79,6 +86,7 @@ struct Ctx {
     cookie: String,
     pages: Pages,
     open: [Arc<AtomicUsize>; 2],
+    chatting: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -217,7 +225,7 @@ fn serve(
     }
     let cookie = format!("xara_token_{}", local.port());
     let open = [Arc::default(), Arc::default()];
-    let ctx = Arc::new(Ctx { access, cookie, pages, open });
+    let ctx = Arc::new(Ctx { access, cookie, pages, open, chatting: Arc::default() });
     let (tx, rx) = channel();
     thread::Builder::new().name("ui-hub".into()).spawn(move || hub(src, controls, info, rx))?;
     thread::Builder::new().name("ui-accept".into()).spawn(move || accept(l, tx, ctx))?;
@@ -374,7 +382,7 @@ fn hub(mut src: impl Source, mut controls: Option<Box<dyn Controls>>, info: Info
     let mut history: VecDeque<String> = VecDeque::new();
     let mut audio = Audio { wf: Waterfall::new(info.span_hz), wanted: false, rows: Vec::new() };
     let mut next = Instant::now() + TICK;
-    let mut ticks = 0u32;
+    let mut pinged = Instant::now();
     loop {
         match msgs.recv_timeout(next.saturating_duration_since(Instant::now())) {
             Ok(Msg::Waterfall(id, on)) => {
@@ -434,11 +442,14 @@ fn hub(mut src: impl Source, mut controls: Option<Box<dyn Controls>>, info: Info
         history.drain(..excess);
         batch.extend(src.status());
         let rows = audio.frames(&mut src);
-        ticks = (ticks + 1) % KEEPALIVE_TICKS;
+        let ping = now.duration_since(pinged) >= KEEPALIVE;
+        if ping {
+            pinged = now;
+        }
         let (kept, gone) = clients.into_iter().partition(|c| {
             batch.iter().all(|m| c.send(m))
                 && (!c.waterfall || rows.iter().all(|r| c.send_binary(r)))
-                && (ticks != 0 || c.ping())
+                && (!ping || c.ping())
         });
         clients = kept;
         gone.iter().for_each(|c| c.w.close());
@@ -551,6 +562,16 @@ fn route(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> io::R
         "/common.js" => respond(&mut s, "200 OK", "text/javascript; charset=utf-8", COMMON_JS.as_bytes()),
         "/common.css" => respond(&mut s, "200 OK", "text/css; charset=utf-8", COMMON_CSS.as_bytes()),
         "/ws" => websocket(s, r, joins, ctx),
+        "/chat" | "/chat/" if ctx.access.chat.is_some() => {
+            respond(&mut s, "200 OK", "text/html; charset=utf-8", CHAT_INDEX.as_bytes())
+        }
+        "/chat.js" if ctx.access.chat.is_some() => {
+            respond(&mut s, "200 OK", "text/javascript; charset=utf-8", CHAT_JS.as_bytes())
+        }
+        "/chat.css" if ctx.access.chat.is_some() => {
+            respond(&mut s, "200 OK", "text/css; charset=utf-8", CHAT_CSS.as_bytes())
+        }
+        "/chat/ws" => chat_websocket(s, r, ctx),
         "/stream" => stream(s, joins, ctx),
         _ => respond(&mut s, "404 Not Found", "text/plain", b"not found\n"),
     }
@@ -738,6 +759,40 @@ fn websocket(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> i
     } else {
         w.close()
     }
+    Ok(())
+}
+
+/// The chat page's websocket, bridged to the TNC's host ports (see `chat`).  It can key the
+/// transmitter, so it needs the control token like the page's other controls; one at a time.
+fn chat_websocket(mut s: TcpStream, r: &Request, ctx: &Ctx) -> io::Result<()> {
+    let Some(ports) = ctx.access.chat else {
+        return respond(&mut s, "404 Not Found", "text/plain", b"not found\n");
+    };
+    let upgrade = r.header("upgrade").is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+    let (Some(key), true, Some("13")) = (r.header("sec-websocket-key"), upgrade, r.header("sec-websocket-version"))
+    else {
+        return respond(&mut s, "400 Bad Request", "text/plain", b"websocket upgrade required\n");
+    };
+    if !same_origin(r) {
+        return respond(&mut s, "403 Forbidden", "text/plain", b"cross-origin websocket refused\n");
+    }
+    if !authorized(r, ctx) {
+        return respond(&mut s, "403 Forbidden", "text/plain", b"the chat page needs --ui-control and the UI token\n");
+    }
+    let Some(_permit) = Permit::take(&ctx.chatting, 1) else {
+        return respond(&mut s, "503 Service Unavailable", "text/plain", b"a chat page is already open\n");
+    };
+    write!(
+        s,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
+        ws::accept_key(key)
+    )?;
+    // as on /ws: a page that stops answering pings (asleep, off wifi) frees the one chat slot
+    s.set_read_timeout(Some(WS_IDLE))?;
+    let _ = s.set_nodelay(true);
+    let w = Arc::new(Writer::spawn(&s)?);
+    crate::chat::serve(s, w.clone(), ports);
+    w.finish();
     Ok(())
 }
 

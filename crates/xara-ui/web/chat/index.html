@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>xara terminal</title>
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/chat.css">
+</head>
+<body>
+<header>
+  <div class="brand">xara <span class="dim">terminal</span></div>
+  <div id="me" class="calls"></div>
+  <a class="navlink" href="/">modem</a>
+  <select id="theme" class="theme" title="Display theme" aria-label="Display theme">
+    <option value="system">System</option>
+    <option value="sodium">Sodium lamp</option>
+    <option value="nixie">Nixie tube</option>
+    <option value="airport">Airport board</option>
+    <option value="deco">Art deco</option>
+  </select>
+  <div id="conn" class="conn">connecting</div>
+</header>
+<main class="chat-main">
+  <section class="card station">
+    <h2>Station</h2>
+    <div class="set-grid">
+      <label>My call<input id="mycall" autocomplete="off" spellcheck="false" placeholder="N0CALL"></label>
+      <label>Bandwidth
+        <select id="bw"><option>2300</option><option>500</option><option>2750</option><option value="">FM / as set</option></select>
+      </label>
+      <label>Text
+        <select id="charset"><option value="latin1">Latin-1 (most programs)</option><option value="utf-8">UTF-8</option></select>
+      </label>
+      <label class="check"><input id="listen" type="checkbox"> Answer calls (LISTEN ON)</label>
+      <label>&nbsp;<button id="apply" class="btn" type="button">Apply</button></label>
+    </div>
+  </section>
+
+  <section class="card link">
+    <div class="state-row">
+      <span id="state" class="state">disconnected</span>
+      <span id="peer" class="peer"></span>
+    </div>
+    <div class="set-grid">
+      <label>Call<input id="target" autocomplete="off" spellcheck="false" placeholder="N1CALL"></label>
+      <label>Via (optional)<input id="via" autocomplete="off" spellcheck="false" placeholder="DIGI"></label>
+    </div>
+    <div class="buttons">
+      <button id="connect" class="btn" type="button">Connect</button>
+      <button id="disconnect" class="btn" type="button">Disconnect</button>
+      <button id="abort" class="btn danger" type="button">Abort</button>
+      <span class="leds"><span id="ptt" class="led ptt">PTT</span></span>
+      <span class="dim">buffer <b id="buffer">0</b> B</span>
+    </div>
+  </section>
+
+  <section class="card log">
+    <div class="card-head"><h2>Conversation</h2><span id="rate" class="cursor"></span></div>
+    <div id="log" class="chatlog" role="log" aria-live="polite"></div>
+    <form id="compose" class="compose">
+      <textarea id="text" rows="2" placeholder="Type and press Enter to send (Shift+Enter for a new line)" aria-label="Message"></textarea>
+      <button class="btn" type="submit">Send</button>
+    </form>
+  </section>
+
+</main>
+<script src="/common.js"></script>
+<script src="/chat.js"></script>
+</body>
+</html>

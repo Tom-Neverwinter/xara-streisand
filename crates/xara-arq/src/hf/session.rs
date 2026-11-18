@@ -27,6 +27,11 @@ const SNR_REF_INIT_DB: f64 = -100.0;
 const CALL_EXTRA_LEAD: u32 = 9;
 const ANSWER_EXTRA_LEAD: u32 = 7;
 const QRT_CWID_BLANKS: [u32; 3] = [9, 12, 10];
+/// Tuner enhancement: requests a gateway lets pass unanswered so its ATU can tune on them (VARA Quick Guide:
+/// "requires 2 additional retries by client users").
+const TUNER_SKIPS: u32 = 2;
+/// A request this long after the last one is a new caller. Callers repeat about every 2.6 s.
+const TUNER_RESET: Time = 10 * crate::time::SECOND;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -34,13 +39,23 @@ pub struct Config {
     pub host: HostSettings,
     pub p2p: bool,
     pub cwid: bool,
+    /// VARA's "Tuner enhancement" gateway option.
+    pub tuner: bool,
     pub seed: u64,
     pub offer_level: Option<Record>,
 }
 
 impl Config {
     pub fn new(bw: Bandwidth, mycall: &str) -> Self {
-        Self { bw, host: HostSettings::new(mycall, 15), p2p: false, cwid: false, seed: 1, offer_level: None }
+        Self {
+            bw,
+            host: HostSettings::new(mycall, 15),
+            p2p: false,
+            cwid: false,
+            tuner: false,
+            seed: 1,
+            offer_level: None,
+        }
     }
 }
 
@@ -236,6 +251,8 @@ pub struct Session {
     attempts: u32,
 
     hold_from: Option<Time>,
+    /// Requests heard while listening, and when the last came: for tuner enhancement.
+    tuner_heard: (u32, Time),
 
     dropped: bool,
 
@@ -294,6 +311,7 @@ impl Session {
             header: None,
             registered,
             hold_from: None,
+            tuner_heard: (0, 0),
             host_kind: TurnKind::Partial,
             host_since_rx: Vec::new(),
             last_held: 0,
@@ -432,7 +450,11 @@ impl Session {
         let k = self.cfg.host.mycalls.len().min(ALIASES as usize) as u32;
         match self.bw {
             Bandwidth::Hz500 => connect_reqs(Bandwidth::Hz500, k).collect(),
-            _ => connect_reqs(Bandwidth::Hz2300, k).chain(connect_reqs(Bandwidth::Hz2750, k)).collect(),
+            // Wide stations take 500 Hz callers too and answer them at 500 (on_request).
+            _ => connect_reqs(Bandwidth::Hz2300, k)
+                .chain(connect_reqs(Bandwidth::Hz2750, k))
+                .chain(connect_reqs(Bandwidth::Hz500, k))
+                .collect(),
         }
     }
 
@@ -843,6 +865,9 @@ impl Session {
 
     fn on_request(&mut self, now: Time, c: CtrlIn) {
         let Some((req_bw, alias)) = connect_req_alias(c.code) else { return };
+        if self.state == State::Listen && self.cfg.tuner && !self.tuner_ready(now) {
+            return;
+        }
         let bw = match req_bw {
             Bandwidth::Hz2300 if self.bw == Bandwidth::Hz500 => self.bw,
             Bandwidth::Hz2750 => self.bw,
@@ -862,6 +887,13 @@ impl Session {
         }
         self.send_ctrl(reply, Fmt::F1, if self.cfg.host.chat { 0 } else { ANSWER_EXTRA_LEAD });
         self.announce();
+    }
+
+    fn tuner_ready(&mut self, now: Time) -> bool {
+        let (n, last) = self.tuner_heard;
+        let n = if now - last > TUNER_RESET { 0 } else { n };
+        self.tuner_heard = (n + 1, now);
+        n >= TUNER_SKIPS
     }
 
     fn switch_bw(&mut self, bw: Bandwidth) {

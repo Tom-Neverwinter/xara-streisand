@@ -48,6 +48,7 @@ struct Args {
     json: bool,
     ui: UiArgs,
     log: Option<PathBuf>,
+    syslog: Option<(String, String)>,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -56,6 +57,7 @@ fn parse() -> Result<Option<Args>, String> {
     let mut audio = None;
     let (mut blind, mut dump, mut verbose, mut key_idle) = (true, false, false, xara::monitor::KEY_IDLE_S);
     let (mut json, mut log) = (false, None);
+    let (mut syslog, mut syslog_name) = (None, String::from("xara-monitor"));
     let mut ui = UiArgs::default();
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -108,6 +110,8 @@ fn parse() -> Result<Option<Args>, String> {
             "--verbose" => verbose = true,
             "--json" => json = true,
             "--log" => log = Some(PathBuf::from(v()?)),
+            "--syslog" => syslog = Some(v()?),
+            "--syslog-name" => syslog_name = v()?,
             _ => return Err(format!("unknown option {k}")),
         }
     }
@@ -122,7 +126,8 @@ fn parse() -> Result<Option<Args>, String> {
         return Err("--hf and --fm cannot both be given".into());
     }
     let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose };
-    Ok(Some(Args { input, audio, bw, fm, mon, json, ui, log }))
+    let syslog = syslog.map(|s| (s, syslog_name));
+    Ok(Some(Args { input, audio, bw, fm, mon, json, ui, log, syslog }))
 }
 
 fn utc(t: f64) -> String {
@@ -142,7 +147,7 @@ fn drain(m: &mut Monitor, out: Out, ui: &mut Option<(Arc<Shared>, Heard)>) -> st
         if let Some((s, h)) = ui {
             s.line(&l, h);
         }
-        if xara::log::to_file() {
+        if xara::log::wants_lines() {
             match out.epoch {
                 Some(e) => xara::log::line(false, format_args!("{} {}", utc(e + l.t), l.text)),
                 None => xara::log::line(false, format_args!("{:9.3} {}", l.t, l.text)),
@@ -286,7 +291,7 @@ fn drain_fm(
         if let Some(p) = events {
             p.event(l.json(epoch.map(|e| e + l.t)));
         }
-        if xara::log::to_file() {
+        if xara::log::wants_lines() {
             match epoch {
                 Some(e) => xara::log::line(false, format_args!("{} {}", utc(e + l.t), l.text)),
                 None => xara::log::line(false, format_args!("{:9.3} {}", l.t, l.text)),
@@ -378,7 +383,7 @@ fn fm_source(input: &Input) -> String {
 // monitor uses, so the input handling mirrors it.
 fn run_fm(a: &Args, bw: FmBandwidth, stop: &Arc<AtomicBool>) -> io::Result<()> {
     let known: Vec<String> = a.mon.calls.iter().chain(&a.mon.names).cloned().collect();
-    let mut m = FmMonitor::new(bw, &fm::Opts { known: known.clone() });
+    let mut m = FmMonitor::new(bw, &fm::Opts { known: known.clone(), dump: a.mon.dump });
     xara::log::line(
         true,
         format_args!(
@@ -583,6 +588,12 @@ fn main() -> ExitCode {
     if let Some(p) = &a.log {
         if let Err(e) = xara::log::open(p) {
             say!("--log {}: {e}", p.display());
+            return ExitCode::FAILURE;
+        }
+    }
+    if let Some((to, name)) = &a.syslog {
+        if let Err(e) = xara::log::syslog(to, name) {
+            say!("--syslog {to}: {e}");
             return ExitCode::FAILURE;
         }
     }

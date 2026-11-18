@@ -1,5 +1,6 @@
 //! Telemetry feed and web UI server (HTTP, WebSocket, NDJSON) for the xara modem.
 pub mod bus;
+pub mod chat;
 pub mod json;
 pub mod messages;
 // The web server is cross-platform: it binds a TcpListener and its access token

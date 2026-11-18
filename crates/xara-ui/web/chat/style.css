@@ -1,0 +1,50 @@
+/* The terminal page: theme tokens and shared parts come from common.css. */
+.chat-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.chat-main .log { grid-column: 1 / -1; }
+.navlink { color: var(--accent); font-size: 13px; text-decoration: none; }
+.state { font-size: 22px; }
+.state.up { color: var(--good); }
+.state.calling { color: var(--warn); }
+.peer { font-family: var(--mono); font-size: 18px; margin-left: 10px; }
+.state-row { margin-bottom: 10px; }
+.led.ptt.on { background: var(--bad); color: #fff; }
+/* form grid, as on the modem page's settings card */
+.set-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+.set-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); min-width: 0; }
+.set-grid input, .set-grid select {
+  font: inherit; font-size: 14px; font-family: var(--mono); color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0;
+}
+.set-grid input::placeholder { color: var(--dim); opacity: .8; }
+.set-grid .btn { align-self: flex-start; }
+.set-grid label.check { flex-direction: row; align-items: center; gap: 8px; }
+.set-grid input:focus, .set-grid select:focus, .compose textarea:focus, .compose input:focus { outline: 1px solid var(--accent); }
+
+.chatlog {
+  height: 340px; overflow-y: auto; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; font-family: var(--mono); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.chatlog .m { margin: 0 0 4px; }
+.chatlog .t { color: var(--dim); margin-right: 8px; font-size: 12px; }
+.chatlog .me { color: var(--k-caller, var(--accent)); }
+.chatlog .peer-line { color: var(--k-answerer, var(--text)); }
+.chatlog .sys { color: var(--dim); font-style: italic; }
+.chatlog .bad { color: var(--bad); }
+.chatlog a { color: var(--accent); }
+.chatlog .me, .chatlog .peer-line { text-shadow: var(--glow); }
+
+.compose { display: flex; gap: 10px; margin-top: 10px; align-items: stretch; }
+.compose textarea, .compose input, .compose select {
+  flex: 1; font: inherit; font-family: var(--mono); font-size: 14px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; resize: vertical; min-width: 0;
+}
+.compose select { flex: 0 0 auto; }
+
+:root[data-theme="airport"] .chatlog .me,
+:root[data-theme="airport"] .chatlog .peer-line { text-transform: uppercase; letter-spacing: .04em; }
+:root[data-theme="airport"] .chatlog { background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, .34) 0 1px, transparent 1px 11px); }
+:root[data-theme="deco"] .chatlog { border-color: rgba(212, 175, 55, .35); }
+:root[data-theme="nixie"] .state, :root[data-theme="nixie"] .peer { font-family: var(--mono); letter-spacing: .04em; }
+
+@media (max-width: 760px) { .chat-main { grid-template-columns: minmax(0, 1fr); } .compose { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .chatlog { scroll-behavior: auto; } }

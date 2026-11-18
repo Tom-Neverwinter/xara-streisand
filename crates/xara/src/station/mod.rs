@@ -48,6 +48,8 @@ pub enum Report {
 pub trait HostConfig: Clone {
     fn host(&self) -> &HostSettings;
     fn host_mut(&mut self) -> &mut HostSettings;
+    /// `CWID ON/OFF`. Only HF sends a CW ID; FM answers WRONG before this is reached.
+    fn set_cwid(&mut self, _on: bool) {}
 }
 
 impl HostConfig for xara_arq::hf::Config {
@@ -56,6 +58,9 @@ impl HostConfig for xara_arq::hf::Config {
     }
     fn host_mut(&mut self) -> &mut HostSettings {
         &mut self.host
+    }
+    fn set_cwid(&mut self, on: bool) {
+        self.cwid = on;
     }
 }
 

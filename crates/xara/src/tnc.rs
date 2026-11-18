@@ -287,7 +287,7 @@ impl<M: Modem> Tnc<M> {
     }
 
     fn echo(&self, s: &str) {
-        if self.echo || crate::log::to_file() {
+        if self.echo || crate::log::wants_lines() {
             crate::log::line(self.echo, format_args!("{:10.3} {s}", secs(self.station.now())));
         }
     }
@@ -301,6 +301,11 @@ impl<M: Modem> Tnc<M> {
         if let Some(t) = &self.telemetry {
             t.event(self.station.now(), e());
         }
+    }
+
+    /// The audio device failed: tell the client, as VARA does, so gateway software can restart us.
+    pub fn missing_soundcard(&self) {
+        self.say(Response::MissingSoundcard);
     }
 
     fn say(&self, r: Response) {
@@ -446,7 +451,13 @@ impl<M: Modem> Tnc<M> {
                 true
             }
             Command::Bw(b) => idle && self.station.set_bw(b),
-            Command::Gateway | Command::Cwid(_) => M::CWID_GATEWAY,
+            Command::Gateway => M::CWID_GATEWAY,
+            // US calls always ID (Session::cwid); this turns it on for everyone else.
+            Command::Cwid(on) if M::CWID_GATEWAY => {
+                self.station.update(|c| c.set_cwid(on));
+                true
+            }
+            Command::Cwid(_) => false,
             Command::Public(_) => true,
             Command::TuneOff => {
                 self.stop_tune();

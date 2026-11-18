@@ -98,6 +98,10 @@ serial PTT uses the `/dev/cuaU*` devices.
 
 ## windows
 
+release builds: each tagged release has a `xara-VERSION-x86_64-pc-windows-msvc.zip`
+(with its `.sha256` and a build-provenance attestation, `gh attestation verify`).
+unzip it anywhere; no installer. to build it yourself:
+
 needs Windows 10 or 11 and the MSVC Rust toolchain (`rustup` installs it and
 asks for the Visual Studio Build Tools, "Desktop development with C++").
 there are no other dependencies: audio goes through WinMM, the same API VARA
@@ -120,14 +124,13 @@ Voicemeeter, …), so a test run can't key a real radio by accident.
 - serial RTS/DTR: `--ptt rts:COM3` (ports above COM9 also work as `\.\COM12`)
 - hamlib: run `rigctld` and use `--ptt rigctld[:HOST:PORT]`
 - `--ptt vox`
-- cm108/cm119 HID PTT (AIOC, Digirig Lite…) is not supported on Windows yet.
-  use a serial PTT, rigctld, or the rig's VOX.
+- cm108/cm119 HID PTT (AIOC, Digirig Lite…) by USB id: `--ptt cm108:VID:PID[:GPIO]`
 
 ### known gaps
 
-- the web UI runs but cannot save settings (saving is Unix-only for now).
-  pass options on the command line or in `--config FILE`.
-- no service files yet: run it from a console or Task Scheduler.
+- no Windows service: xara needs your audio devices, so it runs as a
+  per-user logon task instead. `dist\windows\xara-task.ps1` registers it
+  (config `%APPDATA%\xara\xara.conf`, log `%APPDATA%\xara\xara.log`).
 - WinMM is the only backend (no WASAPI or ASIO).
 
 ## everything else

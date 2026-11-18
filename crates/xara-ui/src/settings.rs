@@ -142,13 +142,21 @@ fn add(out: &mut Pairs, k: String, v: String) -> Result<(), String> {
         return Err(format!("bad value for {k}"));
     }
     if (k == "capture" || k == "playback") && !device_ok(&v) {
-        return Err(format!("{k} {v:?}: not a device name (letters, digits and _.,:=@+- only; no file or tee plugin)"));
+        return Err(format!(
+            "{k} {v:?}: not a device name (on Unix: letters, digits and _.,:=@+- only; no file or tee plugin)"
+        ));
     }
     out.push((k, v));
     Ok(())
 }
 
 fn device_ok(v: &str) -> bool {
+    // WinMM only matches names against its own device list, so the ALSA-plugin hazards (file:, tee:) don't
+    // apply; Windows names carry spaces and brackets ("Line (Voicemod Virtual Audio De").  `add` already
+    // refused control characters.
+    if cfg!(windows) {
+        return v.trim() == v; // empty means unset, as on Unix
+    }
     v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.,:=@+-".contains(&b))
         && !v.split([':', ',', '=']).any(|t| t == "file" || t == "tee")
 }
@@ -167,21 +175,20 @@ pub fn load(dir: &Path) -> Result<Pairs, String> {
     }
 }
 
-#[cfg(not(unix))]
-pub fn store(_dir: &Path, _kv: &Pairs) -> io::Result<()> {
-    Err(io::Error::new(io::ErrorKind::Unsupported, "saving settings is Unix-only for now (file modes)"))
-}
-
-#[cfg(unix)]
 pub fn store(dir: &Path, kv: &Pairs) -> io::Result<()> {
     use std::io::Write;
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = dir.join(format!(".{FILE}.tmp"));
     match std::fs::remove_file(&tmp) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).open(&tmp)?;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    o.mode(0o644); // Windows: the per-user config directory's ACLs apply
+    let mut f = o.open(&tmp)?;
     f.write_all(b"# written by xara; keys are xara(1) options without the leading --\n")?;
     f.write_all(render(kv).as_bytes())?;
     f.sync_all()?;
@@ -210,9 +217,11 @@ mod tests {
             parse_save("call N0CALL\n capture  hw:1,0 \nplayback\n").unwrap(),
             parse(&render(&kv(&[("call", "N0CALL"), ("capture", "hw:1,0"), ("playback", "")]))).unwrap()
         );
-        for bad in ["radio yes", "call A\ncall B", "capture file:x"] {
+        for bad in ["radio yes", "call A\ncall B"] {
             assert!(parse_save(bad).is_err(), "{bad:?}");
         }
+        // an ALSA file plugin on Unix; on Windows only a name WinMM won't find
+        assert_eq!(parse_save("capture file:x").is_err(), cfg!(unix));
         for dev in [
             "plughw:CARD=Device,DEV=0",
             "hw:1,0",
@@ -237,7 +246,8 @@ mod tests {
             "$HOME",
         ] {
             for k in ["capture", "playback"] {
-                assert!(parse(&format!("{k} = {dev}")).is_err(), "{k} {dev}");
+                // ALSA-plugin hazards; WinMM names are free text (device_ok)
+                assert_eq!(parse(&format!("{k} = {dev}")).is_err(), cfg!(unix), "{k} {dev}");
             }
         }
     }
@@ -249,8 +259,19 @@ mod tests {
         assert_eq!(m, kv(&[("call", "N1CALL"), ("drive-db", "-10"), ("playback", "b")]));
     }
 
+    #[cfg(windows)]
     #[test]
-    #[cfg(unix)] // store() is Unix-only, and this checks its symlink handling
+    fn windows_device_names_round_trip() {
+        let p =
+            parse("capture = Microphone (Voicemod Virtual Au\nplayback = Line (Voicemod Virtual Audio De\n").unwrap();
+        assert_eq!(
+            p,
+            kv(&[("capture", "Microphone (Voicemod Virtual Au"), ("playback", "Line (Voicemod Virtual Audio De")])
+        );
+    }
+
+    #[cfg(unix)] // this checks store()'s symlink handling
+    #[test]
     fn store_load_save_reset() {
         let dir = std::env::temp_dir().join(format!("xara-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

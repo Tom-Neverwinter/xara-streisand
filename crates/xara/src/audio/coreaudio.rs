@@ -9,7 +9,7 @@ use super::coreaudio_ffi::{
     self as ffi, AudioQueue, Capture, DeviceInfo, Playback, StreamFormat, TRANSPORT_AGGREGATE, TRANSPORT_VIRTUAL,
 };
 use super::ratematch::{Queue, TxBuffer};
-use super::{Audio, BLOCK, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only, remaining};
+use super::{Audio, BLOCK, Channel, DeviceList, IO_TIMEOUT, Path, RATE, Report, capture_only, remaining};
 use crate::lock;
 
 const RX_BUFFERS: usize = 16;
@@ -216,19 +216,20 @@ struct Play {
 }
 
 impl CoreAudioIo {
-    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer) -> io::Result<Self> {
-        Self::connect(capture, Some((playback, radio, tx)))
+    pub fn open(capture: &str, playback: &str, radio: bool, tx: TxBuffer, ch: Channel) -> io::Result<Self> {
+        Self::connect(capture, Some((playback, radio, tx)), ch)
     }
 
     pub fn open_capture(capture: &str) -> io::Result<Self> {
-        Self::connect(capture, None)
+        Self::connect(capture, None, Channel::Both)
     }
 
-    fn connect(capture: &str, playback: Option<(&str, bool, TxBuffer)>) -> io::Result<Self> {
+    fn connect(capture: &str, playback: Option<(&str, bool, TxBuffer)>, ch: Channel) -> io::Result<Self> {
         let devs = ffi::devices()?;
         let rec_dev = if is_default(capture) { default_input(&devs)? } else { find(&devs, capture, true)? };
-        if rec_dev.inputs > 2 {
-            info!("coreaudio capture {capture:?}: {} channels, using channel 1", rec_dev.inputs);
+        let used = ch.index().map_or(1, |i| i + 1);
+        if rec_dev.inputs > 2 || ch != Channel::Both {
+            info!("coreaudio capture {capture:?}: {} channels, using channel {used}", rec_dev.inputs);
         }
         let playback = playback
             .map(|(name, radio, buf)| check_playback(&devs, name, radio).map(|d| (name, d, buf)))
@@ -236,8 +237,8 @@ impl CoreAudioIo {
         let _opening = Opening::watch();
         let shared = Arc::new(Shared::new());
         let fmt = StreamFormat::s16_mono(RATE);
-        let rec =
-            AudioQueue::input(&fmt, rec_dev, shared.clone(), RX_BUFFERS, BLOCK).map_err(on("capture", capture))?;
+        let rec = AudioQueue::input(&fmt, rec_dev, ch.index(), shared.clone(), RX_BUFFERS, BLOCK)
+            .map_err(on("capture", capture))?;
         let play = playback
             .map(|(name, d, buf)| {
                 let (n, latency) = (tx_buffers(d), scaled(d, d.out_latency));
@@ -246,11 +247,12 @@ impl CoreAudioIo {
                      device latency {latency} frames",
                     scaled(d, 0)
                 );
-                if d.outputs > 2 {
-                    info!("coreaudio playback {name:?}: {} channels, using channel 1", d.outputs);
+                if d.outputs > 2 || ch != Channel::Both {
+                    info!("coreaudio playback {name:?}: {} channels, using channel {used}", d.outputs);
                 }
                 Ok::<_, io::Error>(Play {
-                    q: AudioQueue::output(&fmt, d, shared.clone(), n, BLOCK).map_err(on("playback", name))?,
+                    q: AudioQueue::output(&fmt, d, ch.index(), shared.clone(), n, BLOCK)
+                        .map_err(on("playback", name))?,
                     id: d.id,
                     buffers: n,
                     latency,
