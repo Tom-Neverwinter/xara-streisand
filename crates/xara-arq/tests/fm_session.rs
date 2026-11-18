@@ -129,9 +129,10 @@ fn hex_ping() -> Vec<u8> {
     unhex("424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d")
 }
 
-/// VARA FM's Autotune: stay quiet through the ten louder-and-louder records, then reply with the first step heard.
+/// VARA FM's Autotune: stay quiet through the ten louder-and-louder records, then name the step three above the
+/// first one heard (byte 34 = step << 2).
 #[test]
-fn autotune_replies_with_the_first_step_heard() {
+fn autotune_replies_three_steps_above_the_first_heard() {
     use xara_phy::fm::frame::{Kind, Record0};
     let mut s = fm::Session::new(fm::Config::new(FmBandwidth::Wide, "N1CALL"));
     drain(&mut s);
@@ -158,7 +159,46 @@ fn autotune_replies_with_the_first_step_heard() {
         .collect();
     assert_eq!((pending, replies.len()), (1, 1), "{out:?}");
     let r = Record0::parse(&replies[0]).unwrap();
-    assert_eq!((r.kind, r.tune, r.target.as_str()), (Kind::Reply, 0x30, "N0CALL"));
+    assert_eq!((r.kind, r.tune, r.target.as_str()), (Kind::Reply, 6 << 2, "N0CALL"));
     s.on_tx_done(11 * SECOND);
     assert!(drain(&mut s).iter().any(|o| matches!(o, fm::Output::Host(HostEvent::CancelPending))));
+}
+
+/// Step 10 lost: the Autotune reply still goes out, once step 10 was due and a grace period has passed.
+#[test]
+fn autotune_replies_when_the_last_step_is_lost() {
+    use xara_phy::fm::frame::{Kind, Record0};
+    let mut s = fm::Session::new(fm::Config::new(FmBandwidth::Wide, "N1CALL"));
+    drain(&mut s);
+    let step = |n: u8| {
+        Record0 {
+            kind: Kind::AutoTune,
+            snr: n,
+            control: 1,
+            ..Record0::connect("N0CALL", "N1CALL", "", "", false, true)
+        }
+        .to_bytes()
+        .unwrap()
+    };
+    let replies = |s: &mut fm::Session| {
+        drain(s)
+            .into_iter()
+            .filter_map(|o| {
+                if let fm::Output::Tx(fm::Tx::Data { frames, .. }) = o { Some(frames[0].clone()) } else { None }
+            })
+            .collect::<Vec<_>>()
+    };
+    let period = SECOND * 136 / 100;
+    for n in 1..=8u8 {
+        s.on_record0(i64::from(n) * period, &step(n), 20.0);
+    }
+    // Step 10 is due at 10 periods; still waiting just after it.
+    assert_eq!(s.next_deadline(), Some(10 * period + SECOND / 2));
+    s.poll(10 * period + SECOND / 4);
+    assert!(replies(&mut s).is_empty());
+    s.poll(10 * period + SECOND);
+    let out = replies(&mut s);
+    assert_eq!(out.len(), 1);
+    let r = Record0::parse(&out[0]).unwrap();
+    assert_eq!((r.kind, r.tune, r.target.as_str()), (Kind::Reply, 4 << 2, "N0CALL"));
 }
