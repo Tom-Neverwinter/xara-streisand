@@ -55,6 +55,12 @@ along with KISS for applications such as Pat. See the README for full details.
     Without **--radio**, it must be a Pulse null sink, the ALSA **null** PCM,
     or a virtual CoreAudio device such as BlackHole.
 
+**--channel** left|right|both
+
+:   Which side of a stereo sound card the radio is on, as VARA's channel
+    setting. Default **both**: the device is used as mono. Not for
+    **--audio trusdx**.
+
 **--tx-buffer-ms** *N*
 
 :   Transmit audio queued ahead of the sound card, in ms. 30-500 (default 40).
@@ -172,6 +178,9 @@ along with KISS for applications such as Pat. See the README for full details.
 
 **--offer-level** *N*
 :   HF: offer speed level N at link start instead of picking from S/N
+
+**--tuner-enhancement**
+:   HF gateway: let callers' first 2 connect requests pass, so an ATU can tune
 
 **-h**, **--help**, **-V**, **--version**
 

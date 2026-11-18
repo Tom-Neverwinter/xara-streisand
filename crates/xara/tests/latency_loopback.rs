@@ -49,7 +49,8 @@ fn the_tx_budget_matches_a_loopback() {
     let quantum = env("XARA_LOOP_QUANTUM").map_or(if b == Backend::Pulse { 256 } else { 0 }, |v| v.parse().unwrap());
     let radio = env("XARA_LOOP_RADIO").is_some();
     let buf = env("XARA_LOOP_TX_BUFFER_MS").map_or_else(TxBuffer::default, |v| TxBuffer::ms(v.parse().unwrap()));
-    let mut io = audio::open(b, &capture, &playback, radio, buf, false).unwrap();
+    let ch = env("XARA_LOOP_CHANNEL").map_or(audio::Channel::Both, |v| v.parse().unwrap());
+    let mut io = audio::open(b, &capture, &playback, radio, buf, false, ch).unwrap();
     let mut tx = TxPath::new(0, buf, io.path().unwrap());
     eprintln!("start: {}", tx.budget());
     tx.start(io.as_mut()).unwrap();
