@@ -1,10 +1,11 @@
-//! Audio frequency shift, as VARA SAT's "TX Shift" / "RX Shift" (e.g. -1000 Hz) for satellite
-//! Doppler and transponder offsets: real audio -> analytic signal (FIR Hilbert) -> mixed by
-//! e^(j2πft) -> real.  A positive shift moves the audio up.
+//! Audio frequency shift for satellite Doppler and transponder offsets: real audio -> analytic
+//! signal (FIR Hilbert) -> mixed by e^(j2πft) -> real.  A positive shift moves the audio up.
 use std::f64::consts::PI;
 
 const TAPS: usize = 255;
 const MID: usize = TAPS / 2;
+/// Samples a shift delays the audio by; the link's timing budget has to include it.
+pub const DELAY: usize = MID;
 pub const MAX_HZ: f64 = 2000.0;
 
 pub struct Shift {

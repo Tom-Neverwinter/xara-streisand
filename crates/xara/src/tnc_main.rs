@@ -511,7 +511,8 @@ fn run(
     let tx = TxPath::new(audio::samples(a.timing.lead), tx_buffer(a), io.path()?);
     let b = tx.budget();
     say!("audio: {b}");
-    let opts = Options { drive_db: a.drive_db, tx_latency: b.total(), rx_lag: b.lag(), ptt_tail: tail_samples(a) };
+    let (tx_latency, rx_lag) = with_shifts(a, b.total(), b.lag());
+    let opts = Options { drive_db: a.drive_db, tx_latency, rx_lag, ptt_tail: tail_samples(a) };
     let host = Host::bind(&a.addr, a.port)?;
     let mode = match a.fm {
         Some(bw) => format!("FM {bw:?}"),
@@ -552,6 +553,14 @@ fn run(
             serve(a, io, tx, Tnc::new(station, host), settings, stop, rec)
         }
     }
+}
+
+/// The TX latency and RX lag with the frequency shifters' filter delay added: an RX shift makes
+/// capture later, either shift makes the whole TX turnaround longer.
+fn with_shifts(a: &Args, total: i64, lag: i64) -> (i64, i64) {
+    let on = |hz: f64| i64::from(hz != 0.0 || a.doppler.is_some()) * xara::shift::DELAY as i64;
+    let (rx, tx) = (on(a.rx_shift), on(a.tx_shift));
+    (total + rx + tx, lag + rx)
 }
 
 fn serve<M: Modem>(
@@ -603,7 +612,8 @@ fn serve<M: Modem>(
     let mut shifted = Vec::new();
     let pumped = pump(a, io.as_mut(), tx, stop, rec, |x, out, s| {
         if let Some(b) = s.budget {
-            tnc.set_tx_latency(b.total(), b.lag());
+            let (t, lag) = with_shifts(a, b.total(), b.lag());
+            tnc.set_tx_latency(t, lag);
         }
         if let (Some(d), Some(r), Some(t)) = (&a.doppler, &mut rx_shift, &mut tx_shift) {
             let (dr, dt) = d.now();
