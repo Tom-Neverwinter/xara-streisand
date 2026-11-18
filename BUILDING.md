@@ -98,6 +98,10 @@ serial PTT uses the `/dev/cuaU*` devices.
 
 ## windows
 
+release builds: each tagged release has a `xara-VERSION-x86_64-pc-windows-msvc.zip`
+(with its `.sha256` and a build-provenance attestation, `gh attestation verify`).
+unzip it anywhere; no installer. to build it yourself:
+
 needs Windows 10 or 11 and the MSVC Rust toolchain (`rustup` installs it and
 asks for the Visual Studio Build Tools, "Desktop development with C++").
 there are no other dependencies: audio goes through WinMM, the same API VARA
