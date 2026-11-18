@@ -10,6 +10,7 @@ use xara::cli::{self, UiArgs, Usage, num};
 use xara::ptt::{PttCtl, PttSpec, PttTiming};
 use xara::record::{self, Recorder};
 use xara::say;
+use xara::shift::Shift;
 use xara::signals;
 use xara::station::{self, DEFAULT_DRIVE_DB, Modem, Options};
 use xara::tnc::Tnc;
@@ -51,6 +52,9 @@ struct Args {
     persistence: f64,
     addr: String,
     drive_db: f64,
+    tx_shift: f64,
+    rx_shift: f64,
+    doppler: Option<xara::doppler::Schedule>,
     quiet: bool,
     ui: UiArgs,
     ui_control: bool,
@@ -90,6 +94,9 @@ fn defaults() -> Args {
         persistence: xara_arq::hf::broadcast::DEFAULT_PERSISTENCE,
         addr: xara::DEFAULT_ADDR.into(),
         drive_db: DEFAULT_DRIVE_DB,
+        tx_shift: 0.0,
+        rx_shift: 0.0,
+        doppler: None,
         quiet: false,
         ui: UiArgs::default(),
         ui_control: false,
@@ -149,6 +156,13 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--persistence" => a.persistence = finite(k, &v()?)?.clamp(0.0, 1.0),
         "--addr" => a.addr = v()?,
         "--drive-db" => a.drive_db = finite(k, &v()?)?,
+        "--tx-shift" => a.tx_shift = finite(k, &v()?)?,
+        "--rx-shift" => a.rx_shift = finite(k, &v()?)?,
+        "--doppler" => {
+            let f = v()?;
+            let text = std::fs::read_to_string(&f).map_err(|e| format!("--doppler {f}: {e}"))?;
+            a.doppler = Some(xara::doppler::Schedule::parse(&text).map_err(|e| format!("--doppler {f}: {e}"))?);
+        }
         "--quiet" => a.quiet = true,
         "--ui-control" => a.ui_control = true,
         "--ui-token" => {
@@ -230,6 +244,9 @@ fn check(a: &Args) -> Result<(), String> {
     }
     if !a.digi.is_empty() && a.fm.is_none() {
         return Err("--digi needs --fm".into());
+    }
+    if a.tx_shift.abs() > xara::shift::MAX_HZ || a.rx_shift.abs() > xara::shift::MAX_HZ {
+        return Err(format!("--tx-shift and --rx-shift must be within +-{} Hz", xara::shift::MAX_HZ));
     }
     if a.drive_db > 0.0 {
         return Err("--drive-db must be <= 0".into());
@@ -578,11 +595,33 @@ fn serve<M: Modem>(
         }
         None => None,
     };
+    let rate = f64::from(xara::audio::RATE);
+    let (mut rx_shift, mut tx_shift) = match &a.doppler {
+        Some(_) => (Some(Shift::tracking(a.rx_shift, rate)), Some(Shift::tracking(a.tx_shift, rate))),
+        None => (Shift::new(a.rx_shift, rate), Shift::new(a.tx_shift, rate)),
+    };
+    let mut shifted = Vec::new();
     let pumped = pump(a, io.as_mut(), tx, stop, rec, |x, out, s| {
         if let Some(b) = s.budget {
             tnc.set_tx_latency(b.total(), b.lag());
         }
-        tnc.process(x, out);
+        if let (Some(d), Some(r), Some(t)) = (&a.doppler, &mut rx_shift, &mut tx_shift) {
+            let (dr, dt) = d.now();
+            r.set_hz(a.rx_shift + dr, rate);
+            t.set_hz(a.tx_shift + dt, rate);
+        }
+        match &mut rx_shift {
+            Some(r) => {
+                shifted.clear();
+                shifted.extend_from_slice(x);
+                r.process(&mut shifted);
+                tnc.process(&shifted, out);
+            }
+            None => tnc.process(x, out),
+        }
+        if let Some(t) = &mut tx_shift {
+            t.process(out);
+        }
         tnc.force_ptt_off(s.forced_off);
         Tick { keyed: tnc.keyed(), tuning: tnc.station().tuning(), restart: tnc.restart_requested() }
     });
