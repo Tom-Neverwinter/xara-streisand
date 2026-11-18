@@ -432,7 +432,11 @@ impl Session {
         let k = self.cfg.host.mycalls.len().min(ALIASES as usize) as u32;
         match self.bw {
             Bandwidth::Hz500 => connect_reqs(Bandwidth::Hz500, k).collect(),
-            _ => connect_reqs(Bandwidth::Hz2300, k).chain(connect_reqs(Bandwidth::Hz2750, k)).collect(),
+            // Wide stations take 500 Hz callers too and answer them at 500 (on_request).
+            _ => connect_reqs(Bandwidth::Hz2300, k)
+                .chain(connect_reqs(Bandwidth::Hz2750, k))
+                .chain(connect_reqs(Bandwidth::Hz500, k))
+                .collect(),
         }
     }
 
