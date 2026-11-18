@@ -600,9 +600,11 @@ fn serve<M: Modem>(
     stop: &Arc<AtomicBool>,
     rec: Option<&mut Recorder>,
 ) -> std::io::Result<Outcome> {
+    let mut kiss = None;
     if let Some(p) = a.kiss_port {
         let k = KissServer::bind(&a.addr, p)?;
         say!("KISS {}", k.addr);
+        kiss = Some(k.addr);
         tnc.set_kiss(k);
     }
     tnc.set_echo(!a.quiet);
@@ -617,6 +619,7 @@ fn serve<M: Modem>(
                 token: token.clone(),
                 hosts: a.ui.hosts.clone(),
                 settings: Some(settings),
+                chat: Some(chat_ports(tnc.host().cmd_addr, tnc.host().data_addr, kiss)),
             };
             let ui = UiServer::bind(a.ui.addr(), p, feed, info, access)?;
             say!("UI http://{}/", ui.addr);
@@ -669,6 +672,25 @@ fn serve<M: Modem>(
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
     Ok(Outcome { drive_db: tnc.station().options().drive_db, restart: tnc.restart_requested(), pumped })
+}
+
+/// The TNC's bound host ports as the chat page reaches them (a wildcard bind is reached on loopback).
+fn chat_ports(
+    cmd: std::net::SocketAddr,
+    data: std::net::SocketAddr,
+    kiss: Option<std::net::SocketAddr>,
+) -> xara_ui::chat::HostPorts {
+    let near = |mut s: std::net::SocketAddr| {
+        if s.ip().is_unspecified() {
+            s.set_ip(if s.is_ipv4() {
+                std::net::Ipv4Addr::LOCALHOST.into()
+            } else {
+                std::net::Ipv6Addr::LOCALHOST.into()
+            });
+        }
+        s
+    };
+    xara_ui::chat::HostPorts { cmd: near(cmd), data: near(data), kiss: kiss.map(near) }
 }
 
 fn pump(
