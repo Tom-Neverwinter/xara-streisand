@@ -131,6 +131,8 @@ pub struct Stats {
 pub struct Opts {
     /// Calls to flag as known in the heard list (from `--call` / `--calls`).
     pub known: Vec<String>,
+    /// `--dump`: also print each connect-type record in full (raw bytes and fields).
+    pub dump: bool,
 }
 
 /// A passive FM monitor. Feed it FM-band audio at [`FS`]; read lines with
@@ -144,6 +146,7 @@ pub struct FmMonitor {
     out: VecDeque<Line>,
     stats: Stats,
     follow: Option<Follow>,
+    dump: bool,
 }
 
 fn secs(t_end: i64) -> f64 {
@@ -163,6 +166,7 @@ impl FmMonitor {
             out: VecDeque::new(),
             stats: Stats::default(),
             follow: None,
+            dump: o.dump,
         }
     }
 
@@ -290,9 +294,13 @@ impl FmMonitor {
             return;
         };
         self.stats.connects += 1;
+        if self.dump {
+            let hex: String = frame.bytes.iter().map(|b| format!("{b:02x}")).collect();
+            self.emit(at, Kinds::Note, format!("record {hex} {r:?}"));
+        }
         let verb = match r.kind {
             Kind::Connect => "connect",
-            Kind::Reply => "connect reply",
+            Kind::Reply => "reply",
             Kind::Ping => "ping",
             Kind::AutoTune => "autotune",
         };
@@ -456,7 +464,7 @@ mod tests {
         x.extend(m.transmission(Record::Broadcast, 0, &refs, 9, opt, &mut rand));
         x.extend(std::iter::repeat_n(0.0, 12000));
 
-        let mut mon = FmMonitor::new(bw, &Opts { known: vec!["N1CALL".into()] });
+        let mut mon = FmMonitor::new(bw, &Opts { known: vec!["N1CALL".into()], dump: false });
         let lines = feed_all(&mut mon, &x);
 
         let connect = lines.iter().find(|l| l.kind == Kinds::Connect).expect("a connect line");

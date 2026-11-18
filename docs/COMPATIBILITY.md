@@ -91,8 +91,8 @@ Every documented command is understood (`vara_doc.rs::every_documented_command_i
 |---|---|---|
 | Narrow / wide, all levels | ✅ | Real VARA FM 4.4.1 and xara on one virtual audio loop, 2026-11-18. Connect, data both ways, byte-checked, and disconnect worked in all four cases (narrow/wide × either side calling). Results in the table below this one |
 | Digipeater, up to 2 hops (`--digi`) | ✅ | `fm_digi_link.rs` |
-| Ping (route test) | ❌ | Frames decode (`xara-monitor --fm` shows them); xara neither sends nor answers them. Gap G7 |
-| Autotune | ❌ | Same as Ping. Gap G7 |
+| Ping (route test) | ✅ / 🟡 | xara answers a direct Ping like VARA FM does: a Reply record with the S/N it heard, and `PENDING` … `CANCELPENDING` to the client. Real VARA FM 4.4.1's Ping dialog shows xara's result (lab, 2026-11-18); `fm_frames.rs::vara_ping_and_reply` holds xara's Reply byte-for-byte to VARA's. Not yet: answering Pings through digipeaters, and sending Pings (in VARA that is a GUI button, not a TCP command) |
+| Autotune | ✅ / 🟡 | VARA FM sends 10 AutoTune records, each louder (step 1-10 in byte 33). xara stays quiet, then replies with the first step it heard (byte 34 high nibble; 0 = VARA shows NO SIGNAL), as real VARA FM does on a clean path. VARA's dialog takes xara's reply (lab, 2026-11-18); `fm_frames.rs::vara_autotune` holds it byte-for-byte to VARA's. 🟡: on a weak or noisy path VARA may pick a different step, untested |
 | Variable TX delay for handhelds | 🟡 | Use `--ptt-lead-ms`; there is no FM-specific setting |
 | Audio equalisation for slow handheld receivers | ❌ | Gap G8 |
 | Monitor log of all stations on frequency | ✅ | `xara-monitor --fm` |
@@ -130,7 +130,7 @@ Every gap here can be built and tested without transmitting: two xara instances,
 
 | # | Gap | Why it matters | Where to start |
 |---|---|---|---|
-| G7 | **FM Ping and Autotune** | Route testing and level setting on FM nets | `xara-arq/src/fm/session.rs` (frames already parse) |
+| G7 | **FM Ping and Autotune through digipeaters; Autotune on weak signals** | Level setting and route testing on FM nets | Record a digipeated Ping/Autotune, and an Autotune over a noisy path, in the lab (`xara-monitor --fm --dump` prints the records), then answer them in `xara-arq/src/fm/session.rs` and `fm/digi.rs` |
 | G8 | **FM audio equalisation** | Handhelds with slow receivers | `xara-phy/src/fm` |
 | G10 | **VARA SAT link layer** | QO-100 users | Lab test 2026-11-18, VARA SAT 4.4.5 and xara HF 2300 on one virtual audio loop: VARA SAT does not answer HF connect requests, and its own requests (0.88 s, about 485-2460 Hz) are not HF control frames at any bandwidth or at any frequency offset within ±400 Hz. Its control frames have to be worked out from recordings of its audio before xara can link with it. Issue #5 |
 | G11 | **End-to-end runs with VARA Chat, Terminal, VarAC, Pat** | Proves the client side | issue #4 |

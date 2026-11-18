@@ -35,6 +35,40 @@ fn record0_spec_vector() {
     assert_eq!((snr_byte(-3.0), snr_byte(0.5), snr_byte(40.0)), (1, 4, 245));
 }
 
+/// A Ping and its Reply between two real VARA FM 4.4.1 stations (wide), recorded in a lab loopback on 2026-11-18.
+#[test]
+fn vara_ping_and_reply() {
+    let ping = hex::decode("424e3043414c4c2000202020202020200020202020202020004e3143414c4c200000000100f67d").unwrap();
+    let reply = hex::decode("624e3143414c4c2000202020202020200020202020202020004e3043414c4c2000f50001001096").unwrap();
+    let p = Record0::parse(&ping).unwrap();
+    assert_eq!(
+        (p.kind, p.source.as_str(), p.target.as_str(), p.wide, p.control),
+        (Kind::Ping, "N0CALL", "N1CALL", true, 1)
+    );
+    assert_eq!(p.to_bytes().unwrap(), ping);
+    let r = Record0::parse(&reply).unwrap();
+    assert_eq!((r.kind, r.snr), (Kind::Reply, 245));
+    assert_eq!(Record0::ping_reply("N1CALL", "N0CALL", true, 245).to_bytes().unwrap(), reply);
+}
+
+/// VARA FM 4.4.1 Autotune between two real stations (wide, lab 2026-11-18): ten AutoTune records with the step
+/// in byte 33 (step 3 here), then a Reply naming step 1 in byte 34's high nibble.
+#[test]
+fn vara_autotune() {
+    let step3 = hex::decode("224e3043414c4c2000202020202020200020202020202020004e3143414c4c200003000100e200").unwrap();
+    let reply = hex::decode("624e3143414c4c2000202020202020200020202020202020004e3043414c4c2000f510010053f5").unwrap();
+    let r = Record0::parse(&step3).unwrap();
+    assert_eq!((r.kind, r.snr, r.source.as_str(), r.target.as_str()), (Kind::AutoTune, 3, "N0CALL", "N1CALL"));
+    assert_eq!(r.to_bytes().unwrap(), step3);
+    let p = Record0::parse(&reply).unwrap();
+    assert_eq!((p.kind, p.snr, p.tune_step, p.aes, p.compression), (Kind::Reply, 245, 1, false, 0));
+    assert_eq!(Record0::tune_reply("N1CALL", "N0CALL", true, 245, 1).to_bytes().unwrap(), reply);
+    for step in 0..=10 {
+        let b = Record0::tune_reply("N1CALL", "N0CALL", true, 100, step).to_bytes().unwrap();
+        assert_eq!(Record0::parse(&b).unwrap().tune_step, step);
+    }
+}
+
 #[test]
 fn fm_lab_frames() {
     let v = common::load_doc("fm/lab_frames");
