@@ -23,7 +23,9 @@ What xara-streisand does against each part of the VARA suite, what is missing, a
 | VARA Chat 1.4.3 | ✅ | xara is the modem Chat drives (ports 8300/8301). Run end-to-end both ways between two xara in the lab (2026-11-18) |
 | VARA Terminal 1.2.2 | ✅ | Same as Chat: run end-to-end both ways in the lab (2026-11-18) |
 | VARA HF 4.9.1 / FM 4.4.1 after 2027-01-01 | ❌ | Those versions change their on-air format on 2027-01-01 (shown publicly by K3JSJ and KT7RUN). xara speaks the 4.9.0 / 4.4.0 format. |
-| Winlink Express, Pat, VarAC, BPQ32, vARIM | 🟡 | They talk the TNC protocol in §2, which xara implements. Pat-style sessions are tested (`tnc_tcp.rs`). The real apps are untested. |
+| Pat 1.0.1 | ✅ | Pat's `varahf` transport drives xara (ports 8300/8301). Lab, 2026-11-18: two Pat over two xara HF 2300 ran a full P2P B2F session, one message each way, a 4053-byte attachment arriving byte-identical |
+| VarAC 16.1.8 | ✅ | xara is the VARA HF and VARA FM modem VarAC drives. Lab, 2026-11-18, two VarAC over two xara, HF (VarAC links at 500 Hz) and FM wide: connect, S/N exchange, chat both ways, CQ with slot (listed on the other side), beacon (listed), QSY, VMail delivered and acknowledged, and a VMail attachment (file transfer) arriving byte-identical on HF (≈1080 bps) and FM (≈840 bps). FM CQ and beacons too: xara FM now decodes record 16 for CHAT ON clients, not only KISS ones, and re-arms it once its own TX has drained. Through a digipeater: the `CONNECT … VIA` link VarAC uses runs end to end over a `--digi` xara (driven from the TNC port; VarAC's own window not yet). VarAC closes any QSO after 240 s on its calling frequency and won't send attachments there |
+| Winlink Express, BPQ32, vARIM | 🟡 | They talk the TNC protocol in §2, which xara implements. The real apps are untested. |
 
 ## 2. TNC commands (application → modem, port 8300)
 
@@ -131,10 +133,9 @@ Every gap here can be built and tested without transmitting: two xara instances,
 | # | Gap | Why it matters | Where to start |
 |---|---|---|---|
 | G8 | **FM audio equalisation** | Handhelds with slow receivers | `xara-phy/src/fm` |
-| G10 | **VARA SAT link layer** | QO-100 users | Done: the connect request, from lab recordings of VARA SAT 4.4.5 (2026-11-18). It is single-tone MFSK (21.33 ms symbols, 46.875 Hz grid), a 31-symbol codeword that depends on the target call alone, built with the HF codeword recipe (Rnd seeded `call_hash(target) + 50`, one 3-tooth comb). `xara-phy/src/sat.rs` reproduces all six recorded calls (`tests/sat.rs`). The CW ID is sent as two-tone FSK. Left: what VARA SAT sends back when it hears a request for its call, the data frames after that, and a receiver. Issue #5 |
-| G11 | **End-to-end runs with VarAC and Pat** | Proves the client side | VARA Chat and Terminal done (lab, 2026-11-18); issue #4 |
+| G10 | **VARA SAT link layer** | QO-100 users | From lab recordings of VARA SAT 4.4.5 (2026-11-18). Done: the connect request and the connect reply, single-tone MFSK codewords (21.33 ms symbols, 46.875 Hz grid) built with the HF codeword recipe from Rnd books keyed by the target or answering call; real VARA SAT answers xara's request. `xara-phy/src/sat.rs` builds and finds both (`tests/sat.rs`). The CW ID is two-tone FSK. Left: the control codes of the connected link, which come from more call-keyed books (mapped in the lab, not yet tied to meanings); the data frames (wideband, 500-2400 Hz); and wiring a SAT mode into xara. Issue #5 |
 | G12 | **The 2027 VARA format** | Talking to upgraded stations after 2027-01-01 | not started in this repo |
 
-Closed: G1 (VARA FM interop, §6), G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), G6 (`--tuner-enhancement`), G7 (FM Autotune reply, §6), G9 (`--channel`), 2026-11-18. Numbers are kept so old issue references still point somewhere.
+Closed: G1 (VARA FM interop, §6), G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), G6 (`--tuner-enhancement`), G7 (FM Autotune reply, §6), G9 (`--channel`), G11 (end-to-end runs with VARA Chat, Terminal, Pat and VarAC, §1), 2026-11-18. Numbers are kept so old issue references still point somewhere.
 
 Pick one, open an issue saying you're on it, and see [CONTRIBUTING.md](../CONTRIBUTING.md). Clean sources only: published documents, our own recordings and lab loopback, never VARA's binaries.

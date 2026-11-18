@@ -216,6 +216,10 @@ pub trait Modem {
         let c = self.common_mut();
         f(&mut c.cfg);
         f(c.session.config_mut());
+        // settings such as CHAT ON change what the receiver listens for
+        if let Some(l) = c.listen.clone() {
+            self.apply(l);
+        }
     }
 
     fn pop(&mut self) -> Option<Report> {

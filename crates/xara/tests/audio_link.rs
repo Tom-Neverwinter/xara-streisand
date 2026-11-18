@@ -133,7 +133,7 @@ fn compressed_sessions_over_audio() {
 
 #[test]
 fn ptt_lead_is_absorbed() {
-    for ms in [[300, 0], [500, 0], [0, 100], [100, 100]] {
+    for ms in [[450, 0], [500, 0], [350, 100], [450, 130]] {
         let led = |told| {
             let lead = Lead { ms, lag: [0, 0], told };
             session_led(Bandwidth::Hz2300, true, 0.002, payload(8000, 77), payload(1500, 77), Compression::Text, lead)
@@ -150,6 +150,15 @@ fn median_gap(air: &Air, from: usize, to: usize) -> f64 {
     assert!(g.len() >= 5, "{from} -> {to}: {g:?}\n{}", air.trace());
     g.sort_by(f64::total_cmp);
     g[g.len() / 2]
+}
+
+#[test]
+fn a_slow_answering_station_still_links() {
+    for bw in [Bandwidth::Hz500, Bandwidth::Hz2300, Bandwidth::Hz2750] {
+        let lead = Lead { ms: [0, 300], lag: [0, 0], told: false };
+        let r = session_led(bw, true, 0.002, payload(2000, 77), payload(500, 77), Compression::Text, lead);
+        assert!(r.is_ok(), "{bw:?}: an answerer 300 ms late did not link: {:?}", r.err());
+    }
 }
 
 #[test]

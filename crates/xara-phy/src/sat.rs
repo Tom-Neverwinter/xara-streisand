@@ -19,8 +19,25 @@ const SEED_OFF: u32 = 50;
 
 /// The codeword a station calling `target` sends (tone indices; Hz = index * 46.875).
 pub fn connect_request(target: &str) -> Vec<u32> {
+    codeword(target, SEED_OFF, 0)
+}
+
+/// The codeword a listening station sends back when it hears a request for its call: the 17th codeword of a book
+/// seeded `call_hash(answerer) + 288` (lab, 2026-11-18: real VARA SAT as N1CALL, N1CALM and B2B).
+pub fn connect_reply(answerer: &str) -> Vec<u32> {
+    codeword(answerer, REPLY_SEED_OFF, REPLY_INDEX)
+}
+
+const REPLY_SEED_OFF: u32 = 288;
+const REPLY_INDEX: usize = 16;
+
+/// Codeword `index` of the book for `call`: seed Rnd with `call_hash(call) + off`, then two draws per symbol.
+fn codeword(call: &str, off: u32, index: usize) -> Vec<u32> {
     let mut r = VbRnd::new();
-    r.seed_rnd(call_hash(target.to_ascii_uppercase().as_bytes()) + SEED_OFF);
+    r.seed_rnd(call_hash(call.to_ascii_uppercase().as_bytes()) + off);
+    for _ in 0..index * REQUEST_SYMBOLS * 2 {
+        r.next_f32();
+    }
     (0..REQUEST_SYMBOLS)
         .map(|i| {
             let tooth = r.rand_int(2);
@@ -45,12 +62,26 @@ pub fn synth(tones: &[u32]) -> Vec<f64> {
     tones.iter().flat_map(|&k| sine(k, SYMBOL_SAMPLES)[..SYMBOL_SAMPLES].iter().copied()).collect()
 }
 
+/// A whole reply as tones, opened like a call (the tuner tone first, then the preamble on later replies).
+pub fn reply_tones(answerer: &str, first: bool) -> Vec<u32> {
+    let head = if first { vec![TUNE_TONE; TUNE_SYMBOLS] } else { preamble() };
+    head.into_iter().chain(connect_reply(answerer)).collect()
+}
+
 /// Finds `target`'s connect request in 48 kHz audio: the sample where its 31-symbol body starts, with the share of
 /// grid energy (tones 8..56) that sat on the expected tone, averaged over the body. One tone of a clean request
 /// scores near 1; noise and other calls score around 1/48. Scans in eighth-symbol steps.
 pub fn find_request(x: &[f64], target: &str, min_score: f64) -> Option<(usize, f64)> {
+    find_codeword(x, &connect_request(target), min_score)
+}
+
+/// Finds `answerer`'s connect reply, as `find_request` does a request.
+pub fn find_reply(x: &[f64], answerer: &str, min_score: f64) -> Option<(usize, f64)> {
+    find_codeword(x, &connect_reply(answerer), min_score)
+}
+
+fn find_codeword(x: &[f64], code: &[u32], min_score: f64) -> Option<(usize, f64)> {
     const STEP: usize = SYMBOL_SAMPLES / 8;
-    let code = connect_request(target);
     let starts = (x.len().checked_sub(SYMBOL_SAMPLES)? / STEP) + 1;
     // Power in each grid tone of the symbol-long window at every step.
     let spectra: Vec<[f64; 48]> = (0..starts)
