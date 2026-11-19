@@ -21,7 +21,7 @@ num-complex = "0.4"
 rustfft = "6.4"
 miniz_oxide = "0.8"
 libc = "0.2"
-alsa-sys = "0.3.1"
+alsa-sys = "0.6.1"
 
 [workspace.lints.rust]
 # Enforce the edition-2024 default so a future edition change can't silently
