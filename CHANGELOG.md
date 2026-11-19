@@ -4,6 +4,7 @@
 
 maintained fork of x0rro/xara after upstream was withdrawn.
 
+- FM: decodes through a handheld receiver that is still settling after transmitting (gain rising over the frame, a low-frequency thump): the QAM equaliser now follows the noise floor row by row (G8). Before, the top levels lost about one frame in three behind such a receiver near their noise limit
 - Windows: the TNC runs natively (WinMM audio; serial RTS/DTR, rigctld and VOX PTT; console Ctrl-C), and `xara-monitor` plus its web UI build and run there
 - `xara-monitor --fm narrow|wide`: passive VARA FM decode (connects, CQ, session text), also in the web UI
 - host ports close connections that open with an HTTP request line, so a web page can't drive the TNC

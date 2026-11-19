@@ -300,7 +300,8 @@ impl OfdmEngine {
         eq::derotate(&mut c, thd);
         let cst = constellation(self.l.layout.bps);
         let es = cst.iter().map(|z| z.norm_sqr()).sum::<f64>() / cst.len() as f64;
-        let mut e = eq::Eq::default();
+        // FM audio comes through a radio's receiver, whose gain may still be settling (gap G8).
+        let mut e = eq::Eq::tracking();
         for b in 0..nc {
             let ks: Vec<usize> = (0..nsy).filter(|&r| known(b, r)).collect();
             let hs: Vec<Complex64> = ks.iter().map(|&r| c[r][b]).collect();
