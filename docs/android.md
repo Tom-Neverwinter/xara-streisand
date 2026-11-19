@@ -11,18 +11,23 @@ off-device for now (see *Audio*, below).
 
 ## Status
 
-The headless build **cross-compiles for every Android ABI** —
-`aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android` —
-and CI guards it (the `android` job runs `cargo check` for all three; `check`
-does not link, so it needs no NDK). Portability fixes that got it there:
+Tested on Android 14 (x86_64 emulator image, 2026-11-19):
 
-- `Ioctl` request type is `c_int` on bionic (not `c_ulong`).
-- the async-signal-safe errno accessor is bionic's `__errno`.
-- building with no audio backend is allowed on Android (as on Windows), so
-  `open_capture()` just reports "no backend" at runtime.
+- linked builds for `aarch64-linux-android`, `armv7-linux-androideabi` and
+  `x86_64-linux-android` with the NDK (27.2, API 26); CI links arm64 on every
+  run and keeps it as an artifact;
+- `xara` runs as the TNC with **AAudio** capture and playback
+  (`--capture default --playback default --radio --ptt vox`): both streams
+  open, the command, data and KISS ports answer;
+- **Pat** (v1.0.1, a static `linux/amd64` build) on the same device drives it
+  over `varahf` on localhost: it initialises the modem and connects, and xara
+  calls over AAudio, keying VOX PTT each call, then gives up as it should
+  with no station answering;
+- `xara-monitor` on the device decodes a recording of real VARA SAT (every
+  frame CRC-good, every control code).
 
-Not yet done: a full linked build (needs the NDK linker), on-device audio, and
-the Pat packaging. Those are the remaining #10 subtasks.
+Not yet done: a real phone with a USB-OTG sound card and a radio, and an APK.
+The emulator's audio is the PC's, so nothing here reached a radio.
 
 ## Build
 
@@ -48,15 +53,37 @@ which do not exist on Android.
 
 ## Run, with Pat
 
-On the phone (e.g. under Termux, or as a service):
+Over `adb` (or the same commands in Termux; anything under
+`/data/local/tmp` works from `adb shell`):
 
-1. Start XARA's TNC with the KISS server on localhost:
-   `xara --kiss-port 8100 …` (plus your call and modem options).
-2. Point **Pat** at it as a KISS TNC over TCP (`localhost:8100`).
-3. Pat drives connects/sessions; XARA does the modem work.
+```sh
+adb push xara xara-monitor pat /data/local/tmp/
+adb shell
+cd /data/local/tmp && chmod 755 xara xara-monitor pat
+./xara --call YOURCALL --capture default --playback default --radio --ptt vox &
+```
 
-The web UI (`xara-monitor --ui-port …` for the passive monitor, or the TNC's UI)
-is reachable from the phone's browser at `http://localhost:<port>/`.
+Pat is Go; a static Linux build runs on Android unchanged:
+
+```sh
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go install github.com/la5nta/pat@latest
+```
+
+and its config (`pat --config pat.json`, with `HOME` set to a writable
+directory) points the VARA HF transport at xara:
+
+```json
+{"mycall": "YOURCALL", "secure_login_password": "...",
+ "varahf": {"addr": "127.0.0.1:8300", "bandwidth": 2300, "rig": "", "ptt_ctrl": false}}
+```
+
+Then `pat connect varahf:///CALL` (or `pat http` and the browser). Pat checks
+your Winlink account online before each connect; with no network it asks, so
+run `pat init` once while online. Use `--ptt vox` with a VOX interface, or
+`--ptt cat` / a serial PTT line when the OTG interface has one.
+
+The web UI (`--ui-port`, or `xara-monitor --ui-port …` for the passive
+monitor) is reachable from the phone's browser at `http://localhost:<port>/`.
 
 ## Audio
 
@@ -86,7 +113,7 @@ card on OTG. Every Android output is a real device, so playback needs
 `--radio`; use the headless KISS mode when the audio lives elsewhere.
 
 Linking needs the NDK (`cargo ndk ... build`) since `libaaudio.so` comes from
-it. Written, not yet run on a device.
+it. Run on an Android 14 emulator (see Status); not yet on a phone.
 
 CI builds and links an arm64 binary the same way (NDK clang for API 26 as the
 linker) and keeps it as the `xara-aarch64-linux-android` artifact of each run.
