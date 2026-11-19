@@ -19,7 +19,7 @@ The aim is full compatibility with the entire VARA family, in one program that a
 | VARA FM (narrow / wide) | Working xara-to-xara. Interop with real VARA FM still unproven |
 | VARA SAT | Not yet (the HF-2300 waveform plus Doppler shift) |
 | VARA Chat / VARA Terminal | xara speaks their TCP interface. End-to-end tests against the real apps are still pending |
-| Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` |
+| Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` (the default; change it with `--port N` and `--addr A`, or `port = N` in the config file. Data is on N+1) |
 
 The full feature-by-feature chart, with the test behind each line and the open gaps in priority order, is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Pick a gap up, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
