@@ -16,8 +16,9 @@ pub fn whitening(seed: f64) -> Vec<u8> {
     (0..WHITENING_LEN).map(|_| r.rand_int(1) as u8).collect()
 }
 
-pub fn psk_phasor_index() -> Vec<[u8; PSK_SYMBOLS]> {
-    let mut r = VbRnd::stream(HF_SEED);
+/// PSK training phasors; `seed` is the bandwidth's whitening seed (HF_SEED, or SAT_SEED for VARA SAT).
+pub fn psk_phasor_index(seed: f64) -> Vec<[u8; PSK_SYMBOLS]> {
+    let mut r = VbRnd::stream(seed);
     let mut d = vec![[0u8; PSK_SYMBOLS]; PSK_CARRIERS];
     for ks in [0..411, 411..PSK_SYMBOLS] {
         for row in d.iter_mut() {
@@ -29,13 +30,14 @@ pub fn psk_phasor_index() -> Vec<[u8; PSK_SYMBOLS]> {
     d
 }
 
-pub fn data_dat() -> Vec<u8> {
-    let mut r = VbRnd::stream(HF_SEED);
+pub fn data_dat(seed: f64) -> Vec<u8> {
+    let mut r = VbRnd::stream(seed);
     (0..DATA_DAT_LEN).map(|_| r.rand_int(128) as u8).collect()
 }
 
-pub fn ofdm_phasor_index() -> Vec<[u8; OFDM_SYMBOLS]> {
-    let d = data_dat();
+/// OFDM training phasors from the bandwidth's whitening seed, like `psk_phasor_index`.
+pub fn ofdm_phasor_index(seed: f64) -> Vec<[u8; OFDM_SYMBOLS]> {
+    let d = data_dat(seed);
     let mut it = d.iter().copied();
     let mut out = vec![[0u8; OFDM_SYMBOLS]; OFDM_BINS];
     for ms in [0..409, 409..OFDM_SYMBOLS] {

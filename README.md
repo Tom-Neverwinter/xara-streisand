@@ -17,7 +17,7 @@ The aim is full compatibility with the entire VARA family, in one program that a
 |---|---|
 | VARA HF (500 / 2300 / 2750) | Working. Decodes real on-air VARA HF, including full Winlink sessions |
 | VARA FM (narrow / wide) | Working xara-to-xara. Interop with real VARA FM still unproven |
-| VARA SAT | Links and monitor (`--hf sat`); not yet tested against real VARA SAT on air |
+| VARA SAT | Yes (`--hf sat`): links with real VARA SAT 4.4.5, calling and answering; monitor too |
 | VARA Chat / VARA Terminal | xara speaks their TCP interface. End-to-end tests against the real apps are still pending |
 | Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` (the default; change it with `--port N` and `--addr A`, or `port = N` in the config file. Data is on N+1) |
 

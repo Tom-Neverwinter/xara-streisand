@@ -251,7 +251,13 @@ impl Receiver {
     pub fn expect(&mut self, records: &[Record], nframes: Option<usize>) {
         for &r in records {
             if !self.engines.contains_key(&r) {
-                let mut e = Engine::new(self.bw, r, &self.dec.tables[r.index()], hf::psk_phasors(), hf::ofdm_phasors());
+                let mut e = Engine::new(
+                    self.bw,
+                    r,
+                    &self.dec.tables[r.index()],
+                    hf::psk_phasors(self.bw),
+                    hf::ofdm_phasors(self.bw),
+                );
                 let back = (self.buf.end() - e.span() - FS3 as i64).max(self.asm.done_until - 64 - FS3 as i64 / 4);
                 e.start_at(self.buf.base.max(back));
                 self.engines.insert(r, e);

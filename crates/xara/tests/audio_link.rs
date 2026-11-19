@@ -102,7 +102,8 @@ fn registered_links_climb_over_audio() {
 #[test]
 fn sat_link_over_audio() {
     let air = session(Bandwidth::Sat, true, 0.01, 6000, 800);
-    assert!(air.top_tx(0) >= 5, "{}", air.trace());
+    // SAT headers carry no registration (VARA SAT sends flags 00), so the link tops out at the unregistered level.
+    assert_eq!(air.top_tx(0), 4, "{}", air.trace());
 }
 
 #[test]

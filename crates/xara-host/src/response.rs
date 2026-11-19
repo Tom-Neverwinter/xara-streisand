@@ -5,6 +5,8 @@ pub enum LinkWidth {
     Hz(u32),
     Narrow,
     Wide,
+    /// VARA SAT names no width: `CONNECTED N0CALL N1CALL`.
+    Sat,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -72,6 +74,7 @@ impl fmt::Display for Response {
                     LinkWidth::Hz(hz) => write!(f, " {hz}"),
                     LinkWidth::Narrow => f.write_str(" NARROW"),
                     LinkWidth::Wide => f.write_str(" WIDE"),
+                    LinkWidth::Sat => Ok(()),
                 }
             }
             Response::Disconnected => f.write_str("DISCONNECTED"),

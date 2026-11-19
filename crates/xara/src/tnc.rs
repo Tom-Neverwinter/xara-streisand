@@ -9,6 +9,7 @@ use xara_host::kiss::KissServer;
 use xara_host::response::{LinkWidth, Response};
 use xara_host::server::{Host, Input};
 use xara_phy::fm::level::FmBandwidth;
+use xara_phy::hf::level::Bandwidth;
 use xara_ui::telemetry::{Bitrate, Control, Event, Probe, Telemetry, UI_TUNE_LIMIT};
 const REGISTERED_AFTER: Time = 5 * SECOND;
 pub const HOST_TUNE_LIMIT: Time = 60 * SECOND;
@@ -636,6 +637,7 @@ pub fn response(h: HostEvent) -> Option<Response> {
         HostEvent::CancelPending => Response::CancelPending,
         HostEvent::Connected { caller, answerer, vias, bw } => {
             let width = match bw {
+                LinkBw::Hf(Bandwidth::Sat) => LinkWidth::Sat,
                 LinkBw::Hf(b) => LinkWidth::Hz(b.hz()),
                 LinkBw::Fm(FmBandwidth::Narrow) => LinkWidth::Narrow,
                 LinkBw::Fm(FmBandwidth::Wide) => LinkWidth::Wide,

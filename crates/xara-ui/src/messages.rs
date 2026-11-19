@@ -178,6 +178,7 @@ fn host(o: Obj, r: &Response) -> String {
                 LinkWidth::Hz(hz) => hz.to_string(),
                 LinkWidth::Narrow => "narrow".into(),
                 LinkWidth::Wide => "wide".into(),
+                LinkWidth::Sat => "sat".into(),
             };
             kind("connected").str("caller", caller).str("answerer", answerer).strs("vias", vias).str("bw", &w)
         }

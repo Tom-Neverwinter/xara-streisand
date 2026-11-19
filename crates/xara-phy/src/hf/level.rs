@@ -349,7 +349,9 @@ pub fn qam_limit(bw: Bandwidth) -> Record {
 pub const fn start_level_max(bw: Bandwidth) -> Record {
     match bw {
         Bandwidth::Hz500 => Record(7),
-        Bandwidth::Hz2300 | Bandwidth::Hz2750 | Bandwidth::Sat => Record(6),
+        Bandwidth::Hz2300 | Bandwidth::Hz2750 => Record(6),
+        // One down, like SAT's level table: real VARA SAT takes a header offering 5 and refuses 6 (lab, 2026-11-19).
+        Bandwidth::Sat => Record(5),
     }
 }
 

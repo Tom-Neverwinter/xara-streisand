@@ -19,8 +19,10 @@ type Phasors = Vec<Vec<Complex64>>;
 static TABLES: [OnceLock<Vec<RecordTables>>; 4] = [OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()];
 static WHITE: LazyLock<Vec<u8>> = LazyLock::new(|| seq::whitening(seq::HF_SEED));
 static SAT_WHITE: LazyLock<Vec<u8>> = LazyLock::new(|| seq::whitening(seq::SAT_SEED));
-static PSK_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::psk_phasor_index()));
-static OFDM_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::ofdm_phasor_index()));
+static PSK_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::psk_phasor_index(seq::HF_SEED)));
+static SAT_PSK_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::psk_phasor_index(seq::SAT_SEED)));
+static OFDM_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::ofdm_phasor_index(seq::HF_SEED)));
+static SAT_OFDM_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::ofdm_phasor_index(seq::SAT_SEED)));
 
 fn phasors<const N: usize>(idx: Vec<[u8; N]>) -> Phasors {
     idx.iter()
@@ -40,14 +42,16 @@ pub fn whitening(bw: Bandwidth) -> &'static [u8] {
 pub fn warm(bw: Bandwidth) {
     tables(bw);
     whitening(bw);
-    psk_phasors();
-    ofdm_phasors();
+    psk_phasors(bw);
+    ofdm_phasors(bw);
 }
 
-pub fn psk_phasors() -> &'static [Vec<Complex64>] {
-    &PSK_PHASORS
+/// VARA SAT draws its PSK training symbols from its whitening stream (seed 414), as HF does from 292.
+pub fn psk_phasors(bw: Bandwidth) -> &'static [Vec<Complex64>] {
+    if bw == Bandwidth::Sat { &SAT_PSK_PHASORS } else { &PSK_PHASORS }
 }
 
-pub fn ofdm_phasors() -> &'static [Vec<Complex64>] {
-    &OFDM_PHASORS
+/// SAT's OFDM training symbols, from seed 414 as its PSK ones are (by analogy; not yet seen on air).
+pub fn ofdm_phasors(bw: Bandwidth) -> &'static [Vec<Complex64>] {
+    if bw == Bandwidth::Sat { &SAT_OFDM_PHASORS } else { &OFDM_PHASORS }
 }
