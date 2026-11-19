@@ -92,7 +92,7 @@ Every option can also go in a config file (`--config FILE`, `key = value` lines)
 
 - VARA HF 500 / 2300 / 2750 and VARA FM narrow / wide, ARQ sessions and broadcasts
 - web UI for configuration and management (`--ui-port`): meters, waterfall, S/N history, heard stations,
-  session stats and history, nine display themes; with `--ui-control`, connect / disconnect / listen / CQ, and FM
+  session stats and history, ten display themes (three redraw every readout as hardware: an airport split-flap board, nixie tubes, a car-dash VFD; `?theme=NAME` picks one for a kiosk) and a UTC clock; with `--ui-control`, connect / disconnect / listen / CQ, and FM
   Ping and Autotune
 - the usual TCP ports: VARA command/data and KISS
 - FM digipeating (`--digi N1CALL`)
