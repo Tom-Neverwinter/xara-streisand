@@ -167,7 +167,11 @@ impl Station {
                 }
                 broadcast::Event::Sn(sn) => self.c.reports.push_back(Report::Host(HostEvent::Sn(sn))),
                 broadcast::Event::Kiss(cmd, data) => self.c.reports.push_back(Report::Kiss(cmd, data)),
-                broadcast::Event::Cq(c) => self.c.reports.push_back(Report::Line(c.host_line())),
+                broadcast::Event::Cq(c) => {
+                    // NaN: the TNC uses the latest S/N it reported, which the broadcast sends just before.
+                    self.c.reports.push_back(Report::Heard { call: c.call.clone(), what: "CQ", sn: f64::NAN });
+                    self.c.reports.push_back(Report::Line(c.host_line()))
+                }
             }
         }
     }

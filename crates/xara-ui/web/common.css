@@ -65,6 +65,46 @@
   --k-caller: #8fc7b2; --k-answerer: #d4af37; --k-ok: #5fcaa0; --k-bad: #c56b5b; --k-unproto: #bfa6d0;
   --glow: 0 0 1px rgba(212, 175, 55, .45);
 }
+:root[data-theme="phosphor"] {
+  color-scheme: dark;
+  --bg: #020a04; --card: #04120a; --line: #0d3018; --text: #39ff6a; --dim: #1f9a43;
+  --good: #7dff9b; --warn: #c8ff4a; --bad: #ff5e4a; --accent: #5dff86; --bar: #061a0d;
+  --led-off: #08200f; --band: #39ff6a;
+  --k-caller: #a6ffbd; --k-answerer: #39ff6a; --k-ok: #7dff9b; --k-bad: #ff5e4a; --k-unproto: #b4f06a;
+  --glow: 0 0 2px rgba(57, 255, 106, .8), 0 0 10px rgba(57, 255, 106, .4);
+}
+:root[data-theme="radar"] {
+  color-scheme: dark;
+  --bg: #020b12; --card: #06141f; --line: #0f2c40; --text: #8ff3ff; --dim: #3f8aa0;
+  --good: #3cf2c4; --warn: #ffd166; --bad: #ff5d73; --accent: #22d3ee; --bar: #0a1d2b;
+  --led-off: #0c2232; --band: #22d3ee;
+  --k-caller: #a5f3fc; --k-answerer: #22d3ee; --k-ok: #3cf2c4; --k-bad: #ff5d73; --k-unproto: #93c5fd;
+  --glow: 0 0 1px rgba(34, 211, 238, .7), 0 0 7px rgba(34, 211, 238, .35);
+}
+:root[data-theme="synthwave"] {
+  color-scheme: dark;
+  --bg: #12021f; --card: #1c0630; --line: #3d1460; --text: #fbe7ff; --dim: #b48ad1;
+  --good: #2de2e6; --warn: #ffd319; --bad: #ff2a6d; --accent: #ff6bcb; --bar: #26083f;
+  --led-off: #2a0d45; --band: #ff6bcb;
+  --k-caller: #2de2e6; --k-answerer: #ff6bcb; --k-ok: #2de2e6; --k-bad: #ff2a6d; --k-unproto: #ffd319;
+  --glow: 0 0 2px rgba(255, 107, 203, .7), 0 0 12px rgba(255, 42, 109, .35);
+}
+:root[data-theme="paper"] {
+  color-scheme: light;
+  --bg: #efe8d8; --card: #fbf7ec; --line: #d6ccb4; --text: #2a251c; --dim: #7a6f5a;
+  --good: #2f6b3a; --warn: #9a6a12; --bad: #a3312a; --accent: #1f4e8c; --bar: #e6dcc6;
+  --led-off: #d9cfb8; --band: #c98b1e;
+  --k-caller: #1f4e8c; --k-answerer: #7a3e9d; --k-ok: #2f6b3a; --k-bad: #a3312a; --k-unproto: #6b5a2e;
+  --glow: none;
+}
+:root[data-theme="contrast"] {
+  color-scheme: dark;
+  --bg: #000; --card: #000; --line: #fff; --text: #fff; --dim: #d0d0d0;
+  --good: #00ff00; --warn: #ffff00; --bad: #ff4040; --accent: #00ffff; --bar: #222;
+  --led-off: #333; --band: #ffff00;
+  --k-caller: #00ffff; --k-answerer: #ffff00; --k-ok: #00ff00; --k-bad: #ff4040; --k-unproto: #ff80ff;
+  --glow: none;
+}
 /* The glow is `none` outside a theme, so these elements are unaffected by default. */
 .brand, .state, .tile b, .led.on, .val, .ascii, #wf-cursor { text-shadow: var(--glow); }
 :root[data-theme="nixie"] .tile b,
@@ -78,6 +118,18 @@
 :root[data-theme="airport"] #log {
   background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, .34) 0 1px, transparent 1px 11px);
 }
+/* Phosphor and radar: monospace readouts and faint scan lines, like a CRT. */
+:root[data-theme="phosphor"] .tile b, :root[data-theme="phosphor"] .state,
+:root[data-theme="radar"] .tile b, :root[data-theme="radar"] .state { font-family: var(--mono); }
+:root[data-theme="phosphor"] .card, :root[data-theme="radar"] .card {
+  background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, .25) 0 1px, transparent 1px 3px);
+}
+/* Paper: a printed station log, serif text on ruled paper. */
+:root[data-theme="paper"] body { font-family: Georgia, "Times New Roman", serif; }
+:root[data-theme="paper"] #log { background-image: repeating-linear-gradient(0deg, #d6ccb4 0 1px, transparent 1px 22px); }
+/* High contrast: thick borders and underlined links for low vision. */
+:root[data-theme="contrast"] .card { border: 2px solid #fff; }
+:root[data-theme="contrast"] a { text-decoration: underline; }
 /* Art deco: gold serif headings with thin rules. */
 :root[data-theme="deco"] .brand,
 :root[data-theme="deco"] h2,

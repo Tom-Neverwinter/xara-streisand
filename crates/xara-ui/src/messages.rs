@@ -1,6 +1,6 @@
 use crate::json::Obj;
 use crate::settings::{Device, Devices, FILE, Pairs, Settings};
-use crate::telemetry::{Event, METER_FLOOR_DB, Meter, Snapshot, UI_TUNE_LIMIT};
+use crate::telemetry::{Event, METER_FLOOR_DB, Meter, Session, Snapshot, UI_TUNE_LIMIT};
 use crate::waterfall::{BINS, STEP_DB, WF_FLOOR_DB, Waterfall, span_for};
 use xara_arq::time::{SECOND, Time};
 use xara_host::command::DRIVE_MIN_DB;
@@ -101,7 +101,35 @@ pub(crate) fn status(s: &Snapshot) -> String {
         .int("buffer", s.buffered as u64)
         .strs("calls", &s.calls)
         .int("dropped", s.dropped as u64)
+        .bool("listen", s.listen)
+        .opt_obj("session", s.session.as_ref().map(session))
+        .arr("sessions", s.sessions.iter().map(|p| session(&p.session).num2("until", secs(p.until))))
+        .arr(
+            "heard",
+            s.heard_list.iter().map(|h| {
+                Obj::new()
+                    .str("call", &h.call)
+                    .str("what", &h.what)
+                    .num2("at", secs(h.at))
+                    .opt2("sn", h.sn)
+                    .int("count", u64::from(h.count))
+            }),
+        )
+        .opt_obj(
+            "probe",
+            s.probe.as_ref().map(|p| {
+                let o = Obj::new().str("call", &p.call).num2("at", secs(p.at)).opt2("sn", p.sn);
+                match p.step {
+                    Some(st) => o.int("step", u64::from(st)),
+                    None => o,
+                }
+            }),
+        )
         .end()
+}
+
+fn session(s: &Session) -> Obj {
+    Obj::new().str("peer", &s.peer).num2("since", secs(s.since)).int("tx_bytes", s.tx_bytes).int("rx_bytes", s.rx_bytes)
 }
 
 pub(crate) fn waterfall(w: &Waterfall) -> String {
@@ -173,7 +201,7 @@ fn host(o: Obj, r: &Response) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::telemetry::{Bitrate, Link};
+    use crate::telemetry::{Bitrate, Link, Probe};
 
     #[test]
     fn status_message() {
@@ -191,12 +219,17 @@ mod tests {
             sn: Some(11.25),
             bitrate: Some(Bitrate { level: 7, bps: 2412, tx: false }),
             calls: vec!["N0CALL".into()],
+            listen: true,
             ..Snapshot::default()
         };
         s.rx.feed(&[0.5; 4]);
+        s.link_up("N1CALL");
+        s.session.as_mut().unwrap().tx_bytes = 12;
+        s.heard("N2CALL", "CQ", Some(9.5));
+        s.probe = Some(Probe { call: "N3CALL".into(), at: 48_000, sn: Some(20.0), step: Some(4) });
         assert_eq!(
             status(&s),
-            r#"{"t":"status","ts":1.5,"rx":{"rms":-6.02,"peak":-6.02,"clip":0},"tx":{"rms":-120,"peak":-120,"clip":0},"ptt":true,"busy":false,"tuning":false,"tune_left":0,"drive":0,"state":"Receiving","level":7,"peer":"N1CALL","bw":"2300","passband":[350,2650],"attempts":0,"retries":0,"afc":null,"sn":11.25,"bitrate":{"level":7,"bps":2412,"tx":false},"buffer":0,"calls":["N0CALL"],"dropped":0}"#
+            r#"{"t":"status","ts":1.5,"rx":{"rms":-6.02,"peak":-6.02,"clip":0},"tx":{"rms":-120,"peak":-120,"clip":0},"ptt":true,"busy":false,"tuning":false,"tune_left":0,"drive":0,"state":"Receiving","level":7,"peer":"N1CALL","bw":"2300","passband":[350,2650],"attempts":0,"retries":0,"afc":null,"sn":11.25,"bitrate":{"level":7,"bps":2412,"tx":false},"buffer":0,"calls":["N0CALL"],"dropped":0,"listen":true,"session":{"peer":"N1CALL","since":1.5,"tx_bytes":12,"rx_bytes":0},"sessions":[],"heard":[{"call":"N2CALL","what":"CQ","at":1.5,"sn":9.5,"count":1}],"probe":{"call":"N3CALL","at":1,"sn":20,"step":4}}"#
         );
     }
 

@@ -37,12 +37,22 @@ impl Default for Options {
 pub enum Report {
     Host(HostEvent),
     Ptt(bool),
-    Bitrate { level: usize, bps: u32, tx: bool },
+    Bitrate {
+        level: usize,
+        bps: u32,
+        tx: bool,
+    },
     Busy(bool),
     UnencryptedLink,
     Trace(String),
     Line(String),
     Kiss(Command, Vec<u8>),
+    /// A station heard on the air (for the UI's heard list): its call, what it sent, and the S/N.
+    Heard {
+        call: String,
+        what: &'static str,
+        sn: f64,
+    },
 }
 
 pub trait HostConfig: Clone {
@@ -247,6 +257,15 @@ pub trait Modem {
     fn drop_link(&mut self) {
         self.common_mut().session.drop_link();
         self.drain();
+    }
+
+    fn listen_on(&self) -> bool {
+        self.common().listen_on
+    }
+
+    /// FM's Ping (`tune` false) or Autotune to `target`; other modes have neither.
+    fn probe(&mut self, _target: &str, _vias: &[String], _tune: bool) -> bool {
+        false
     }
 
     fn set_listen(&mut self, on: bool) {

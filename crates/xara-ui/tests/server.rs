@@ -72,7 +72,7 @@ impl Drop for Scratch {
 }
 
 fn kinds(c: &[(u64, Control)]) -> Vec<Control> {
-    c.iter().map(|c| c.1).collect()
+    c.iter().map(|c| c.1.clone()).collect()
 }
 
 #[test]
