@@ -17,3 +17,6 @@ rustfft.workspace = true
 
 [dev-dependencies]
 xara-testkit.workspace = true
+
+[lints]
+workspace = true

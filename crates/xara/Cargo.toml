@@ -29,3 +29,6 @@ alsa = ["dep:alsa-sys"]
 trusdx = []
 fixed-turbo = ["xara-phy/fixed-turbo"]
 float-turbo = ["xara-phy/float-turbo"]
+
+[lints]
+workspace = true

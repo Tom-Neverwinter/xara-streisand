@@ -7,3 +7,7 @@ publish.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Test-only JSON reader, SHA-256, hex and socket helpers for the xara workspace."
+
+[lints.rust]
+unsafe_code = "forbid"
+unsafe_op_in_unsafe_fn = "deny"
