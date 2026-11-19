@@ -139,7 +139,7 @@ pub const fn connect_off(sender: Role) -> u32 {
 pub const fn req_seed_off(bw: Bandwidth) -> u32 {
     match bw {
         Bandwidth::Hz500 => 7,
-        Bandwidth::Hz2300 => 0,
+        Bandwidth::Hz2300 | Bandwidth::Sat => 0,
         Bandwidth::Hz2750 => 8,
     }
 }
@@ -183,6 +183,9 @@ impl FromIterator<u32> for Symbol {
 pub type Codeword = Vec<Symbol>;
 
 pub fn family(code: u32, bw: Bandwidth) -> u32 {
+    if bw == Bandwidth::Sat {
+        return sat_family(code);
+    }
     match (code::connect_reply_q(code), code::connect_req_alias(code)) {
         (Some((b, _)), _) => bw_family(b),
         (_, Some((Bandwidth::Hz2750, _))) => bw_family(Bandwidth::Hz2300),
@@ -192,10 +195,33 @@ pub fn family(code: u32, bw: Bandwidth) -> u32 {
     }
 }
 
+/// VARA SAT generates codes 1..=47 in its main book (HF: 1..=58).
+pub const SAT_CODES: u32 = 47;
+/// SAT's per-link codes, generated as HF's BREAK and IDLE are (their meaning in SAT is inferred).
+pub const SAT_CONNECT_CODES: [u32; 2] = [48, 49];
+/// Seed of SAT's code 47 (HF seeds code 47 with 0xCD80A4).
+pub const SAT_SEED_47: u64 = 0x0192_AD1A;
+
+/// SAT's tone combs (base = n·COMB + off): families 1 and 3 share (1, 16); family 2 is (2, 11).
+pub const fn sat_family_comb(v: u32) -> (u32, u32) {
+    match v {
+        2 => (2, 11),
+        _ => (1, 16),
+    }
+}
+
+pub const fn sat_family(code: u32) -> u32 {
+    match code {
+        22..=25 | 31..=35 => 1,
+        41..=44 => 3,
+        _ => 2,
+    }
+}
+
 pub const fn bw_family(bw: Bandwidth) -> u32 {
     match bw {
         Bandwidth::Hz500 => 1,
-        Bandwidth::Hz2300 => 2,
+        Bandwidth::Hz2300 | Bandwidth::Sat => 2,
         Bandwidth::Hz2750 => 3,
     }
 }
@@ -209,7 +235,10 @@ pub const fn family_comb(v: u32) -> (u32, u32) {
 }
 
 pub fn gen_code(r: &mut VbRnd, fmt: Fmt, v: u32) -> Codeword {
-    let (n, off) = family_comb(v);
+    gen_code_comb(r, fmt, v, family_comb(v))
+}
+
+fn gen_code_comb(r: &mut VbRnd, fmt: Fmt, v: u32, (n, off): (u32, u32)) -> Codeword {
     let f = fmt.params();
     (2..=f.nsym)
         .map(|s| {
@@ -233,6 +262,9 @@ pub struct Codebook {
 
 impl Codebook {
     pub fn new(seed_value: u32, mycall_hashes: [u32; 5], role: Role, bw: Bandwidth) -> Self {
+        if bw == Bandwidth::Sat {
+            return Self::new_sat(seed_value, mycall_hashes, role);
+        }
         let side_off = [book_off(role.peer()), book_off(role)].map(u64::from);
         let seed = u64::from(seed_value);
         let mut codes: [[Vec<Codeword>; 3]; 2] = Default::default();
@@ -271,6 +303,10 @@ impl Codebook {
     }
 
     pub fn set_connect_codes_tx_rnd(&mut self, seed_value: u32, role: Role) -> VbRnd {
+        if self.bw == Bandwidth::Sat {
+            self.set_sat_connect_codes(seed_value, role);
+            return VbRnd::new();
+        }
         let side_off = [connect_off(role.peer()), connect_off(role)].map(u64::from);
         let mut r = VbRnd::new();
         for (u, &so) in side_off.iter().enumerate() {
@@ -282,6 +318,57 @@ impl Codebook {
             }
         }
         r
+    }
+
+    /// VARA SAT 4.4.5's codebook: HF's generator with 47 codes, no
+    /// KISS or start-level codes, SAT's tone combs, code 45 seeded like HF's CQ and code 47 by
+    /// `SAT_SEED_47`.  Its connect codes come from `set_sat_connect_codes`.  Bandwidth-family
+    /// codes use family 2, as HF 2300's do. Checked against every control codeword heard on a recorded link
+    /// between two real VARA SAT stations (`tests/sat_ctrl_lab.rs`).
+    pub fn new_sat(seed_value: u32, mycall_hashes: [u32; 5], role: Role) -> Self {
+        let side_off = [book_off(role.peer()), book_off(role)].map(u64::from);
+        let seed = u64::from(seed_value);
+        let mut codes: [[Vec<Codeword>; 3]; 2] = Default::default();
+        let mut r = VbRnd::new();
+        for (u, &so) in side_off.iter().enumerate() {
+            for f in Fmt::ALL {
+                let fo = f.index() as u64 + so;
+                let book = &mut codes[u][f.index()];
+                *book = vec![Vec::new(); NUM_CODES + 1];
+                r.seed_rnd_wide(seed + u64::from(SEED_OFF) + fo);
+                for c in 1..=SAT_CODES {
+                    if let Some((b, k)) = code::connect_req_alias(c) {
+                        let peer = if u == 1 && k == 0 { seed_value } else { mycall_hashes[k as usize] };
+                        r.seed_rnd_wide(u64::from(peer) + fo + u64::from(req_seed_off(b)));
+                    }
+                    match c {
+                        code::CONNECT_REPLY_2750 => r.seed_rnd_wide(seed + u64::from(SEED_OFF_REPLY_2750) + fo),
+                        45 => r.seed_rnd_wide(0xA3CE37 + fo),
+                        47 => r.seed_rnd_wide(SAT_SEED_47 + fo),
+                        _ => {}
+                    }
+                    let v = sat_family(c);
+                    book[c as usize] = gen_code_comb(&mut r, f, v, sat_family_comb(v));
+                }
+            }
+        }
+        let mut cb = Self { bw: Bandwidth::Sat, codes };
+        cb.set_sat_connect_codes(seed_value, role);
+        cb
+    }
+
+    /// SAT's per-link codes: seeded as HF's BREAK/IDLE, stored as 48/49 (their meaning in SAT is inferred).
+    pub fn set_sat_connect_codes(&mut self, seed_value: u32, role: Role) {
+        let side_off = [connect_off(role.peer()), connect_off(role)].map(u64::from);
+        let mut r = VbRnd::new();
+        for (u, &so) in side_off.iter().enumerate() {
+            for f in Fmt::ALL {
+                r.seed_rnd_wide(f.index() as u64 + u64::from(seed_value) + so);
+                for c in SAT_CONNECT_CODES {
+                    self.codes[u][f.index()][c as usize] = gen_code_comb(&mut r, f, 2, sat_family_comb(2));
+                }
+            }
+        }
     }
 
     pub fn rx(&self, fmt: Fmt, code: u32) -> &Codeword {

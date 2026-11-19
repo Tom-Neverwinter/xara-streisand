@@ -19,7 +19,7 @@ What xara-streisand does against each part of the VARA suite, what is missing, a
 |---|---|---|
 | VARA HF 4.9.0 (500 / 2300 / 2750) | ✅ | Decodes real on-air VARA HF, including full Winlink sessions. All 13 / 16 / 17 published speed levels. |
 | VARA FM 4.4.0 (narrow / wide) | ✅ | Proven against real VARA FM 4.4.1 in a lab loopback on 2026-11-18 (§6). Digipeating is xara↔xara only so far. |
-| VARA SAT 4.4.5 (QO-100) | ❌ | TX/RX frequency shift and Doppler schedules are in (`--tx-shift`, `--rx-shift`, `--doppler`). The SAT link itself is not yet. Its connect request is now known and reproduced bit for bit (`xara-phy/src/sat.rs`); its reply and data frames are next (see G10). |
+| VARA SAT 4.4.5 (QO-100) | 🟡 | Receive: `xara-monitor --hf sat` decodes real VARA SAT data frames (a recorded link between two VARA SAT stations, every frame CRC-good, 2026-11-19). SAT has its own 17-level table (HF 2300's engine shifted down one level, with its own FSK levels), tables (seed 99), whitening (seed 414) and control codebook; the codebook reproduces every control codeword heard on that link. TX/RX shift and Doppler schedules are in (`--tx-shift`, `--rx-shift`, `--doppler`). Not yet: SAT links from the TNC (G10) |
 | VARA Chat 1.4.3 | ✅ | xara is the modem Chat drives (ports 8300/8301). Run end-to-end both ways between two xara in the lab (2026-11-18) |
 | VARA Terminal 1.2.2 | ✅ | Same as Chat: run end-to-end both ways in the lab (2026-11-18) |
 | VARA HF 4.9.1 / FM 4.4.1 after 2027-01-01 | ❌ | Those versions change their on-air format on 2027-01-01 (shown publicly by K3JSJ and KT7RUN). xara speaks the 4.9.0 / 4.4.0 format. |
@@ -132,7 +132,7 @@ Every gap here can be built and tested without transmitting: two xara instances,
 
 | # | Gap | Why it matters | Where to start |
 |---|---|---|---|
-| G10 | **VARA SAT link layer** | QO-100 users | From lab recordings of VARA SAT 4.4.5 (2026-11-18). Done: the connect request and the connect reply, single-tone MFSK codewords (21.33 ms symbols, 46.875 Hz grid) built with the HF codeword recipe from Rnd books keyed by the target or answering call; real VARA SAT answers xara's request. `xara-phy/src/sat.rs` builds and finds both (`tests/sat.rs`). The CW ID is two-tone FSK. Left: the control codes of the connected link, which come from more call-keyed books (mapped in the lab, not yet tied to meanings); the data frames (wideband, 500-2400 Hz); and wiring a SAT mode into xara. Issue #5 |
+| G10 | **VARA SAT link layer** | QO-100 users | Done: data frames (all levels, decoded from real VARA SAT audio), the control codebook (matches a recorded link), the connect request and reply (`xara-phy/src/sat.rs`), and `xara-monitor --hf sat`. Left: detecting SAT's control codes (one tone per 1024-sample symbol on a 46.875 Hz grid: HF's tones at twice the speed), then SAT links from the TNC, checked against real VARA SAT. The meaning of codes 45-49 is inferred. Issue #5 |
 | G12 | **The 2027 VARA format** | Talking to upgraded stations after 2027-01-01 | not started in this repo |
 
 Closed: G1 (VARA FM interop, §6), G2 (500 Hz callers), G3 (`CLEANTXBUFFER` already matches 4.9.0), G4 (`CWID`), G5 (`MISSING SOUNDCARD`), G6 (`--tuner-enhancement`), G7 (FM Autotune reply, §6), G9 (`--channel`), G11 (end-to-end runs with VARA Chat, Terminal, Pat and VarAC, §1), 2026-11-18; G8 (FM audio equalisation for slow handheld receivers, §6), 2026-11-19. Numbers are kept so old issue references still point somewhere.

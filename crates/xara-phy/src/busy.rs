@@ -15,7 +15,7 @@ const FULL_SCALE: f64 = 32767.0;
 pub fn tone_band(bw: Bandwidth) -> (usize, usize, usize) {
     match bw {
         Bandwidth::Hz500 => (54, 74, 4),
-        Bandwidth::Hz2300 => (21, 107, 14),
+        Bandwidth::Hz2300 | Bandwidth::Sat => (21, 107, 14),
         Bandwidth::Hz2750 => (16, 112, 17),
     }
 }
@@ -23,7 +23,7 @@ pub fn tone_band(bw: Bandwidth) -> (usize, usize, usize) {
 pub fn signature_band(bw: Bandwidth) -> (usize, usize) {
     match bw {
         Bandwidth::Hz500 => (27, 37),
-        Bandwidth::Hz2300 => (15, 49),
+        Bandwidth::Hz2300 | Bandwidth::Sat => (15, 49),
         Bandwidth::Hz2750 => (10, 54),
     }
 }

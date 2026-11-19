@@ -24,6 +24,8 @@ fn decode_allow_at(bw: Bandwidth, i: usize) -> i64 {
         Bandwidth::Hz500 => &DECODE_ALLOW_500,
         Bandwidth::Hz2300 => &DECODE_ALLOW_2300,
         Bandwidth::Hz2750 => &DECODE_ALLOW_2750,
+        // SAT level k is HF 2300's level k+1 (same engine)
+        Bandwidth::Sat => &DECODE_ALLOW_2300[1..],
     };
     t[i]
 }

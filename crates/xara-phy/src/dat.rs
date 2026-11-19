@@ -8,6 +8,9 @@ const FM_PP: u32 = crate::fm::level::PILOT_PERIOD;
 
 pub const TABLE_SEED: f64 = 43.0;
 pub const FM_RECORD16_SEED: f64 = 77.0;
+/// VARA SAT's interleaver and turbo tables come from the same generator as HF's, seeded with 99 (checked by decoding
+/// recorded VARA SAT frames, `tests/sat_frames.rs`).
+pub const SAT_TABLE_SEED: f64 = 99.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordTables {
@@ -121,8 +124,12 @@ fn fm_other(r: &mut VbRnd, f: &Layout) -> Vec<u16> {
 }
 
 pub fn hf_tables(bw: Bandwidth) -> Vec<RecordTables> {
-    let mut r = VbRnd::stream(TABLE_SEED);
-    bw.table()
+    level_tables(bw.table(), if bw == Bandwidth::Sat { SAT_TABLE_SEED } else { TABLE_SEED })
+}
+
+fn level_tables(levels: &[Level], seed: f64) -> Vec<RecordTables> {
+    let mut r = VbRnd::stream(seed);
+    levels
         .iter()
         .map(|l| {
             let chan = perm(&mut r, l.n());

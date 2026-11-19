@@ -16,8 +16,9 @@ use std::sync::{LazyLock, OnceLock};
 
 type Phasors = Vec<Vec<Complex64>>;
 
-static TABLES: [OnceLock<Vec<RecordTables>>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+static TABLES: [OnceLock<Vec<RecordTables>>; 4] = [OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()];
 static WHITE: LazyLock<Vec<u8>> = LazyLock::new(|| seq::whitening(seq::HF_SEED));
+static SAT_WHITE: LazyLock<Vec<u8>> = LazyLock::new(|| seq::whitening(seq::SAT_SEED));
 static PSK_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::psk_phasor_index()));
 static OFDM_PHASORS: LazyLock<Phasors> = LazyLock::new(|| phasors(seq::ofdm_phasor_index()));
 
@@ -31,13 +32,14 @@ pub fn tables(bw: Bandwidth) -> &'static [RecordTables] {
     TABLES[bw as usize].get_or_init(|| hf_tables(bw))
 }
 
-pub fn whitening() -> &'static [u8] {
-    &WHITE
+/// VARA SAT whitens its data frames with its own Rnd stream (seed 414; lab recordings, 2026-11-18).
+pub fn whitening(bw: Bandwidth) -> &'static [u8] {
+    if bw == Bandwidth::Sat { &SAT_WHITE } else { &WHITE }
 }
 
 pub fn warm(bw: Bandwidth) {
     tables(bw);
-    whitening();
+    whitening(bw);
     psk_phasors();
     ofdm_phasors();
 }

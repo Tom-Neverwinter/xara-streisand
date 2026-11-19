@@ -350,7 +350,8 @@ impl Monitor {
             rx: Receiver::new(bw, &levels, 1, None),
             un_rx,
             bc,
-            blind: o.blind.then(|| BlindDetector::new(bw)),
+            // the blind search is tuned to HF's control-tone combs; SAT's differ
+            blind: (o.blind && bw != Bandwidth::Sat).then(|| BlindDetector::new(bw)),
             keys: BTreeMap::new(),
             tags: Vec::new(),
             names: HashMap::new(),

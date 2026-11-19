@@ -2,6 +2,8 @@ use crate::rnd::VbRnd;
 
 pub const HF_SEED: f64 = 292.0;
 pub const FM_SEED: f64 = 43.0;
+/// VARA SAT data-frame whitening seed (found from lab audio: the whitening that makes recorded SAT frames pass CRC).
+pub const SAT_SEED: f64 = 414.0;
 pub const WHITENING_LEN: usize = 150_000;
 pub const PSK_CARRIERS: usize = 13;
 pub const PSK_SYMBOLS: usize = 471;

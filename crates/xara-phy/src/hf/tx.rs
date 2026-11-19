@@ -36,7 +36,7 @@ impl Modulator {
         let l = self.bw.level(record);
         let t = &self.tables[record.index()];
         let mut info = frame_bits(frame, l.k as usize);
-        whiten(&mut info, hf::whitening());
+        whiten(&mut info, hf::whitening(self.bw));
         interleave(&turbo_encode(&info, &t.turbo, l.puncture_period(), l.n() as usize), &t.chan)
     }
 

@@ -254,6 +254,9 @@ fn check(a: &Args) -> Result<(), String> {
     if a.ui_token.is_some() && !a.ui_control {
         return Err("--ui-token needs --ui-control".into());
     }
+    if a.bw == Bandwidth::Sat {
+        return Err("--hf sat: VARA SAT's connection setup differs from HF's and is not implemented; xara-monitor --hf sat decodes SAT data frames".into());
+    }
     if a.hf_given && a.fm.is_some() {
         return Err("--hf and --fm cannot both be given".into());
     }

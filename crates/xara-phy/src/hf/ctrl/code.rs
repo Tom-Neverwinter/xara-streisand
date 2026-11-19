@@ -46,7 +46,7 @@ pub const fn connect_req(bw: Bandwidth, alias: u32) -> u32 {
     alias
         + match bw {
             Bandwidth::Hz500 => CONNECT_REQ_500,
-            Bandwidth::Hz2300 => CONNECT_REQ_2300,
+            Bandwidth::Hz2300 | Bandwidth::Sat => CONNECT_REQ_2300,
             Bandwidth::Hz2750 => CONNECT_REQ_2750,
         }
 }
@@ -59,7 +59,7 @@ pub const fn connect_reply(bw: Bandwidth, q: u32) -> u32 {
     q - 1
         + match bw {
             Bandwidth::Hz500 => CONNECT_REPLY_500,
-            Bandwidth::Hz2300 => CONNECT_REPLY_2300,
+            Bandwidth::Hz2300 | Bandwidth::Sat => CONNECT_REPLY_2300,
             Bandwidth::Hz2750 => CONNECT_REPLY_2750,
         }
 }

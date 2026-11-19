@@ -507,9 +507,9 @@ fn run(a: Args, stop: &Arc<AtomicBool>) -> std::io::Result<()> {
     xara::log::line(
         true,
         format_args!(
-            "xara-monitor {}: {} Hz, {} configured calls, {} names, blind {}",
+            "xara-monitor {}: {}, {} configured calls, {} names, blind {}",
             env!("CARGO_PKG_VERSION"),
-            a.bw.hz(),
+            if a.bw == Bandwidth::Sat { "VARA SAT".to_string() } else { format!("{} Hz", a.bw.hz()) },
             a.mon.calls.len(),
             a.mon.names.len(),
             if a.mon.blind { "on" } else { "off" }

@@ -254,7 +254,7 @@ options:
                             winmm on Windows, else pulse
     --capture SOURCE        audio source
 
-    --hf 500|2300|2750      HF bandwidth (default 2300)
+    --hf 500|2300|2750|sat  HF bandwidth (default 2300); sat = VARA SAT data frames
     --fm narrow|wide        monitor VARA FM: connects, CQ, and session text
 
     --call CALL             known call (repeatable)
