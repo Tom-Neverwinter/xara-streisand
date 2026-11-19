@@ -38,6 +38,7 @@ const SWEEP3: i64 = 10 * S3;
 pub const KEY_IDLE_S: f64 = 30.0 * 60.0;
 const CACHE: usize = 64;
 const PREVIEW: usize = 100;
+const RAW_MAX: usize = 64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line {
@@ -137,11 +138,20 @@ pub struct MonitorOpts {
     pub key_idle: f64,
     pub dump: bool,
     pub verbose: bool,
+    pub diag: bool,
 }
 
 impl Default for MonitorOpts {
     fn default() -> Self {
-        Self { calls: Vec::new(), names: Vec::new(), blind: true, key_idle: KEY_IDLE_S, dump: false, verbose: false }
+        Self {
+            calls: Vec::new(),
+            names: Vec::new(),
+            blind: true,
+            key_idle: KEY_IDLE_S,
+            dump: false,
+            verbose: false,
+            diag: false,
+        }
     }
 }
 
@@ -155,12 +165,40 @@ struct Header {
     call: String,
     flags: u8,
     start: u8,
+    raw: [u8; 8],
+}
+
+/// Header flag bits no known VARA or XARA version uses: everything but `valid` (7),
+/// encryption (5..4), compression (2..1) and `registered` (0).
+const HEADER_UNKNOWN_FLAGS: u8 = 0x48;
+
+impl Header {
+    /// What XARA's session layer accepts as a header: byte 6 is zero and the `valid` flag is set.
+    fn strict(&self) -> bool {
+        self.raw[6] == 0 && self.flags & 0x80 != 0
+    }
+
+    /// Everything about this header that 4.9.0-era traffic never shows.
+    fn unusual(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        if self.raw[6] != 0 {
+            v.push(format!("byte 6 = {:02x}", self.raw[6]));
+        }
+        if self.flags & 0x80 == 0 {
+            v.push("valid flag clear".to_string());
+        }
+        if self.flags & HEADER_UNKNOWN_FLAGS != 0 {
+            v.push(format!("unknown flag bits {:02x}", self.flags & HEADER_UNKNOWN_FLAGS));
+        }
+        v
+    }
 }
 
 pub struct Monitor {
     pub bw: Bandwidth,
     dump: bool,
     verbose: bool,
+    diag: bool,
     key_idle: f64,
     pub stats: Stats,
     rx: Receiver,
@@ -179,6 +217,7 @@ pub struct Monitor {
     seq: u64,
     now48: i64,
     last_sender: Option<Role>,
+    await_header: bool,
     link: Option<Link>,
     out: VecDeque<Line>,
     next_sweep: i64,
@@ -264,7 +303,18 @@ pub fn escape(b: &[u8], max: usize) -> String {
     s
 }
 
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
 fn header(b: &[u8]) -> Option<Header> {
+    header_shape(b).filter(Header::strict)
+}
+
+/// A frame laid out like a session header: a final, uncompressed frame whose field is exactly a
+/// packed callsign, byte 6 and a flags byte. Many ordinary frames have this shape too, so only
+/// `header` (the strict form) is trusted outside the header position of a connect.
+fn header_shape(b: &[u8]) -> Option<Header> {
     let n = b.len();
     if n < 12 {
         return None;
@@ -275,10 +325,11 @@ fn header(b: &[u8]) -> Option<Header> {
     }
     let field = &b[..n - 4];
     let len = if full { field.len() } else { field.iter().rposition(|&x| x == TERMINATOR)? };
-    if len != 8 || b[6] != 0 || b[7] & 0x80 == 0 {
+    if len != 8 {
         return None;
     }
-    unpack_call(&b[..6]).filter(|c| !c.is_empty()).map(|call| Header { call, flags: b[7], start: b[n - 4] })
+    let raw: [u8; 8] = b[..8].try_into().ok()?;
+    unpack_call(&b[..6]).filter(|c| !c.is_empty()).map(|call| Header { call, flags: b[7], start: b[n - 4], raw })
 }
 
 impl Monitor {
@@ -293,6 +344,7 @@ impl Monitor {
             bw,
             dump: o.dump,
             verbose: o.verbose,
+            diag: o.diag,
             key_idle: o.key_idle,
             stats: Stats::default(),
             rx: Receiver::new(bw, &levels, 1, None),
@@ -311,6 +363,7 @@ impl Monitor {
             seq: 0,
             now48: 0,
             last_sender: None,
+            await_header: false,
             link: None,
             out: VecDeque::new(),
             next_sweep: SWEEP3,
@@ -764,6 +817,14 @@ impl Monitor {
         };
         self.emit(t3, rec);
         self.last_sender = Some(sender);
+        // The session header follows a connect reply. Keep waiting through a repeated connect or
+        // a NACK (the header is sent again); any other control frame means the session moved on,
+        // whether or not this receiver decoded the header.
+        if connect_reply_q(d.code).is_some() {
+            self.await_header = true;
+        } else if d.code != NACK && connect_req_alias(d.code).is_none() {
+            self.await_header = false;
+        }
         if let Key::Answerer(a) = key {
             if FIRST_CONNECT_REQS.contains(&d.code)
                 && self.link.as_ref().is_some_and(|l| l.answerer.is_some_and(|x| x != a))
@@ -805,19 +866,43 @@ impl Monitor {
             })
             .collect();
         let sn = t.frames.iter().find(|f| f.frame.ok).map(|f| f.frame.snr_avg_db.unwrap_or(f.frame.snr_db));
-        let is_header = t.frames.first().is_some_and(|f| f.frame.ok && header(&f.frame.bytes).is_some());
+        // The first data frame after a connect reply is the session header. There, anything
+        // header-shaped is taken as the header even if XARA's session layer would refuse it.
+        let first = t.frames.first().filter(|f| f.frame.ok);
+        let expect_header = self.await_header && first.is_some();
+        let is_header = first.is_some_and(|f| {
+            let h = if expect_header { header_shape(&f.frame.bytes) } else { header(&f.frame.bytes) };
+            h.is_some()
+        });
         let sender = if is_header { Some(Role::Caller) } else { self.last_sender.map(other) };
         let afc = t.frames.first().map_or(0.0, |f| f.afc_hz);
         self.emit(t.t_end, Record::Data { level: t.record.get(), frames: ok, sn, afc, sender });
-        for f in t.frames.iter().filter(|f| f.frame.ok) {
-            self.show_frame(t.t_end, f, sender);
+        if self.diag {
+            for (index, f) in t.frames.iter().enumerate().filter(|(_, f)| !f.missing) {
+                let d = &f.frame;
+                let rec = Record::FrameDiag {
+                    index,
+                    ok: d.ok,
+                    snr: d.snr_db,
+                    raw_snr: d.raw_snr_db,
+                    afc_res: d.afc_res,
+                    iterations: d.iterations,
+                };
+                self.emit(t.t_end, rec);
+            }
+        }
+        for (i, f) in t.frames.iter().enumerate().filter(|(_, f)| f.frame.ok) {
+            self.show_frame(t.t_end, f, sender, expect_header && i == 0);
+        }
+        if expect_header {
+            self.await_header = false;
         }
         if is_header {
             self.last_sender = Some(Role::Caller);
         }
     }
 
-    fn show_frame(&mut self, t3: i64, f: &FrameRx, sender: Option<Role>) {
+    fn show_frame(&mut self, t3: i64, f: &FrameRx, sender: Option<Role>, expect_header: bool) {
         let b = &f.frame.bytes;
         let n = b.len();
         let (ctrl, last, full) = Control::from_byte(b[n - 3]);
@@ -834,14 +919,27 @@ impl Monitor {
             full,
             body,
         };
-        if let Some(Header { call, flags: fl, start }) = header(b) {
+        let found = if expect_header { header_shape(b) } else { header(b) };
+        if expect_header && found.is_none() {
+            self.emit(t3, Record::NoHeader { raw: hex(&b[..n.min(RAW_MAX)]), len: n });
+        }
+        if let Some(h) = found {
+            let (unusual, raw) = (h.unusual(), hex(&h.raw));
+            if !h.strict() {
+                // `on_event` only learns strict headers; follow this caller too.
+                let k = call_hash(h.call.as_bytes());
+                self.names.insert(k, h.call.clone());
+                self.learn(Key::Caller(k), Origin::Header, t3, &[]);
+            }
+            let Header { call, flags: fl, start, .. } = h;
             let comp = Compression::from_flags(fl);
             let link = self.link.get_or_insert_with(|| Link { start: t3 as f64 / FS3, ..Link::default() });
             link.caller = Some(call.clone());
             link.comp = comp;
             let answerer = link.answerer.map_or("?".into(), |a| self.name(Key::Answerer(a)));
             let marker_ok = marker == term_marker(call.as_bytes()) || full;
-            self.emit(t3, Record::Header { call, answerer, flags: fl, start, marker_ok });
+            let show_raw = self.diag;
+            self.emit(t3, Record::Header { call, answerer, flags: fl, start, marker_ok, raw, unusual, show_raw });
             return;
         }
         let i = dir(sender);
@@ -893,6 +991,11 @@ impl Monitor {
         match ev {
             Event::Ctrl(c) => {
                 let d = &c.det;
+                // A broadcast announcement is a control codeword with a fixed seed, and some of
+                // those seeds are also the seed of a connect request to some callsign hash (level 2:
+                // 0xCD80A4 = 500 Hz connect to hash 0xCD809D). Mark it as explained so the blind
+                // detector does not report a connect and learn a phantom key from it.
+                self.mark(d.t_end - (d.fmt.params().nsym as i64 - 1) * SYM3, d.t_end);
                 if self.bc.on_ctrl(d.code, c.t_end48()) {
                     let rec = Record::Unproto { code: d.code, fmt: d.fmt, hits: d.hits, snr: d.snr_norm };
                     self.push(d.t_end, Ev::Rec(rec));
@@ -927,5 +1030,55 @@ impl Monitor {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A session header as real VARA sends it at level 1 (`vectors/vara_frames.json`, `session_header`).
+    fn vara_header() -> Vec<u8> {
+        vec![0x39, 0xb0, 0xc1, 0x30, 0xc0, 0x00, 0x00, 0x80, 0x03, 0x4b, 0xe1, 0x7a]
+    }
+
+    #[test]
+    fn real_header_is_strict_and_unremarkable() {
+        let h = header(&vara_header()).expect("header");
+        assert!(h.strict() && h.unusual().is_empty());
+        assert_eq!((h.flags, h.start), (0x80, 3));
+        assert_eq!(hex(&h.raw), "39b0c130c0000080");
+    }
+
+    #[test]
+    fn altered_headers_keep_their_shape_and_say_what_is_odd() {
+        let with = |i: usize, v: u8| {
+            let mut b = vara_header();
+            b[i] = v;
+            b
+        };
+        let stamped = with(6, 0x2a);
+        assert!(header(&stamped).is_none(), "the strict form must still refuse it");
+        assert_eq!(header_shape(&stamped).unwrap().unusual(), ["byte 6 = 2a"]);
+
+        let invalid = with(7, 0x03);
+        assert!(header(&invalid).is_none());
+        assert_eq!(header_shape(&invalid).unwrap().unusual(), ["valid flag clear"]);
+
+        let bits = with(7, 0x80 | 0x48 | 0x30 | 0x03);
+        let h = header(&bits).expect("unknown flag bits alone do not stop a header");
+        assert_eq!(h.unusual(), ["unknown flag bits 48"], "encryption, compression and registered are known");
+
+        let both = with(6, 0x01);
+        let mut both = both;
+        both[7] = 0x40;
+        assert_eq!(header_shape(&both).unwrap().unusual(), ["byte 6 = 01", "valid flag clear", "unknown flag bits 40"]);
+    }
+
+    #[test]
+    fn a_frame_that_is_not_final_is_never_a_header() {
+        let mut b = vara_header();
+        b[9] &= !0x02;
+        assert!(header_shape(&b).is_none());
     }
 }
