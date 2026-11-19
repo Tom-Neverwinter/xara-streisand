@@ -277,3 +277,377 @@ select { font: inherit; font-size: 13px; color: var(--text); background: var(--b
 .state.idle { color: var(--dim); }
 .state.linked { color: var(--good); }
 .led.clip.on { background: var(--bad); color: #fff; }
+
+/* ---- Display hardware (common.js "Display hardware") ------------------------------------------------------ */
+/* The plain readouts stay in the page for screen readers; the drawn copy beside them is aria-hidden. */
+[data-display] :is(.tile > b, .state, .meter .val, #drive-val, #clock) { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.disp { display: inline-flex; align-items: center; vertical-align: middle; line-height: 1; }
+.clock-wrap { display: flex; align-items: center; gap: 6px; }
+.clock-wrap small { font-size: 11px; color: var(--dim); letter-spacing: .1em; }
+.clock { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+[data-display] .meter { grid-template-columns: 28px minmax(0, 1fr) auto; }
+[data-display] .meter .disp, [data-display] .drive .disp { justify-self: end; }
+[data-display] .tile .disp { display: flex; margin-top: 4px; }
+[data-display] .tile small { display: block; margin: 2px 0 0; font-size: 11px; }
+
+/* Airport: a Solari split-flap departures board. */
+:root[data-theme="airport"] {
+  --bg: #050506; --card: #0d0d0f; --line: #23252a; --text: #f4f1e6; --dim: #8d939c; --accent: #ffc72c;
+  --band: #ffc72c;
+}
+:root[data-theme="airport"] body {
+  background: radial-gradient(ellipse at 50% -20%, #1b1c20, #050506 60%);
+  font-family: "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+}
+:root[data-theme="airport"] header { background: #0a0a0c; border-bottom: 4px solid #ffc72c; }
+:root[data-theme="airport"] .brand { text-transform: uppercase; letter-spacing: .3em; }
+:root[data-theme="airport"] .brand::before { content: "\2708"; margin-right: .5em; color: #ffc72c; }
+:root[data-theme="airport"] .card {
+  background: linear-gradient(#121215, #0b0b0d); border: 1px solid #26272c; border-radius: 3px;
+  box-shadow: inset 0 0 0 5px #08080a, inset 0 0 0 6px #1a1b1f, 0 10px 24px rgba(0, 0, 0, .7);
+}
+:root[data-theme="airport"] h2 {
+  display: inline-block; background: #ffc72c; color: #0b0b0d; padding: 3px 12px; border-radius: 2px;
+  font-weight: 800; letter-spacing: .2em;
+}
+:root[data-theme="airport"] h2 .dim { color: #3a2f0a; }
+:root[data-theme="airport"] .tile { background: #070708; border: 1px solid #1d1e22; border-radius: 2px; }
+:root[data-theme="airport"] .tile label,
+:root[data-theme="airport"] .list th,
+:root[data-theme="airport"] .meter label,
+:root[data-theme="airport"] .drive label {
+  color: #ffc72c; text-transform: uppercase; letter-spacing: .16em; font-size: 10px; font-weight: 700;
+}
+:root[data-theme="airport"] .list td {
+  text-transform: uppercase; font-family: var(--mono); letter-spacing: .08em; border-bottom: 1px solid #1a1b1f;
+}
+:root[data-theme="airport"] .list tbody tr:nth-child(odd) { background: #0f0f12; }
+:root[data-theme="airport"] .led { border-radius: 2px; letter-spacing: .2em; }
+:root[data-theme="airport"] .led.on { background: #ffc72c; color: #0b0b0d; }
+.disp.flap { gap: 2px; }
+.disp.flap { font-size: 22px; }
+.state + .disp.flap { font-size: 24px; }
+.clock + .disp.flap { font-size: 20px; }
+.val + .disp.flap, #drive-val + .disp.flap { font-size: 12px; }
+.disp.flap > .flap {
+  position: relative; display: inline-block; width: .78em; height: 1.36em; line-height: 1.36em;
+  perspective: 5em; font-family: "Helvetica Neue", "Arial Narrow", Arial, sans-serif; font-weight: 700;
+  text-align: center; text-shadow: none; border-radius: .12em; box-shadow: 0 .06em .1em rgba(0, 0, 0, .8);
+}
+.disp.flap > .flap .h {
+  position: absolute; left: 0; right: 0; height: 50%; overflow: hidden; backface-visibility: hidden;
+  background: linear-gradient(#2e2f33, #202125);
+}
+.disp.flap > .flap .h i { position: absolute; left: 0; right: 0; height: 200%; font-style: normal; }
+.disp.flap > .flap .t, .disp.flap > .flap .lt { top: 0; border-radius: .12em .12em 0 0; }
+.disp.flap > .flap .b, .disp.flap > .flap .lb { bottom: 0; border-radius: 0 0 .12em .12em; background: linear-gradient(#1b1c1f, #26272b); }
+.disp.flap > .flap .t i, .disp.flap > .flap .lt i { top: 0; }
+.disp.flap > .flap .b i, .disp.flap > .flap .lb i { bottom: 0; }
+.disp.flap > .flap .lt { transform-origin: 50% 100%; visibility: hidden; z-index: 2; }
+.disp.flap > .flap .lb { transform-origin: 50% 0; visibility: hidden; z-index: 2; transform: rotateX(90deg); }
+.disp.flap > .flap.go .lt { visibility: visible; animation: flap-top 45ms ease-in both; }
+.disp.flap > .flap.go .lb { visibility: visible; animation: flap-bottom 45ms ease-out 45ms both; }
+@keyframes flap-top { from { transform: rotateX(0); } to { transform: rotateX(-90deg); filter: brightness(.45); } }
+@keyframes flap-bottom { from { transform: rotateX(90deg); filter: brightness(1.8); } to { transform: rotateX(0); } }
+/* The seam between the two cards, and the hinge pins either side of it. */
+.disp.flap > .flap::after {
+  content: ""; position: absolute; left: 0; right: 0; top: calc(50% - .5px); height: 1px; background: #000; z-index: 3;
+}
+.disp.flap > .flap::before {
+  content: ""; position: absolute; left: -1px; right: -1px; top: calc(50% - .09em); height: .18em; z-index: 4;
+  border-left: 2px solid #3a3b40; border-right: 2px solid #3a3b40;
+}
+
+/* Nixie: IN-14 tubes on a walnut and brass chassis. */
+:root[data-theme="nixie"] body {
+  background:
+    repeating-linear-gradient(93deg, rgba(255, 210, 160, .025) 0 2px, transparent 2px 7px, rgba(0, 0, 0, .12) 7px 9px, transparent 9px 15px),
+    linear-gradient(#1f120a, #0c0705);
+}
+:root[data-theme="nixie"] header { background: linear-gradient(#2a1a0e, #170e07); border-bottom: 2px solid #8a6a33; }
+:root[data-theme="nixie"] .brand { font-family: Georgia, serif; letter-spacing: .2em; color: #d8b56a; text-shadow: none; }
+:root[data-theme="nixie"] .card {
+  background: linear-gradient(#130b07, #0a0605); border: 1px solid #6b4f28; border-radius: 6px;
+  box-shadow: inset 0 0 0 1px #000, inset 0 0 40px rgba(0, 0, 0, .85), 0 8px 22px rgba(0, 0, 0, .6);
+}
+:root[data-theme="nixie"] h2 { color: #c9a25a; font-family: Georgia, serif; letter-spacing: .24em; }
+:root[data-theme="nixie"] .tile { background: #060303; border: 1px solid #2a1c10; border-radius: 4px; box-shadow: inset 0 2px 10px #000; }
+/* Engraved brass name plates. */
+:root[data-theme="nixie"] .tile label {
+  display: inline-block; background: linear-gradient(#e0bf74, #9a7535); color: #2a1806; padding: 1px 7px;
+  border-radius: 2px; font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .45);
+}
+:root[data-theme="nixie"] .led { border-radius: 2px; background: #1a0f08; color: #6b4a2a; }
+:root[data-theme="nixie"] .led::before {
+  content: ""; display: inline-block; width: .7em; height: .7em; margin-right: .5em; border-radius: 50%;
+  background: #3a2414; vertical-align: -.05em;
+}
+:root[data-theme="nixie"] .led.on { background: #1a0f08; color: #ffb36b; }
+:root[data-theme="nixie"] .led.on::before { background: #ff8a3a; box-shadow: 0 0 4px #ff6a00, 0 0 10px #ff5000; }
+.disp.nixie { gap: .12em; font-size: 26px; }
+.state + .disp.nixie { font-size: 30px; }
+.clock + .disp.nixie { font-size: 24px; }
+.val + .disp.nixie, #drive-val + .disp.nixie { font-size: 12px; }
+.disp.nixie .tube {
+  position: relative; display: inline-block; width: .8em; height: 1.5em; flex: none;
+  border-radius: .4em .4em .14em .14em; border-bottom: .12em solid #2b2420;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, .07), transparent 28%, transparent 72%, rgba(255, 255, 255, .05)),
+    radial-gradient(ellipse at 50% 40%, rgba(255, 110, 30, .07), transparent 65%), #0b0706;
+  box-shadow: inset 0 0 0 1px rgba(255, 225, 200, .1), inset 0 -.3em .4em rgba(0, 0, 0, .8), 0 .1em .2em #000;
+}
+.disp.nixie .tube b {
+  position: absolute; inset: 0; text-align: center; line-height: 1.42em; font-style: normal; font-weight: 300;
+  font-family: "Bahnschrift Light", "DIN Alternate", "Helvetica Neue", Arial, sans-serif; font-size: 1.05em;
+  color: transparent; -webkit-text-stroke: .6px rgba(170, 130, 100, .22); text-shadow: none;
+  transition: color .12s, text-shadow .2s;
+}
+.disp.nixie .tube b.on {
+  z-index: 10; color: #ffe2bf; -webkit-text-stroke: .6px #ff8a2a;
+  text-shadow: 0 0 .05em #ffb060, 0 0 .18em #ff6a00, 0 0 .45em rgba(255, 80, 0, .75), 0 0 .9em rgba(255, 60, 0, .35);
+}
+/* Hexagonal anode mesh in front of the cathodes, and the glass highlight. */
+.disp.nixie .tube::after {
+  content: ""; position: absolute; inset: .08em .06em .04em; border-radius: .34em .34em .08em .08em; z-index: 20;
+  background: radial-gradient(circle, transparent .9px, rgba(120, 90, 70, .22) 1.2px) 0 0 / .16em .14em;
+  pointer-events: none;
+}
+.disp.nixie .tube::before {
+  content: ""; position: absolute; top: .1em; left: .1em; width: .1em; height: 55%; border-radius: .1em; z-index: 21;
+  background: linear-gradient(rgba(255, 255, 255, .22), transparent);
+}
+.disp.nixie .tube .dp {
+  position: absolute; right: .08em; bottom: .16em; width: .12em; height: .12em; border-radius: 50%; z-index: 11;
+  background: rgba(170, 130, 100, .15);
+}
+.disp.nixie .tube .dp.on { background: #ffd2a0; box-shadow: 0 0 .1em #ff7a1a, 0 0 .3em #ff5000; }
+.disp.nixie .neon { position: relative; display: inline-block; width: .32em; height: 1.5em; flex: none; }
+.disp.nixie .neon i {
+  position: absolute; left: .08em; width: .16em; height: .16em; border-radius: 50%;
+  background: #ff9a4a; box-shadow: 0 0 .08em #ff6a00, 0 0 .3em #ff5000;
+}
+.disp.nixie .neon i:first-child { top: 35%; }
+.disp.nixie .neon i:last-child { top: 62%; }
+
+/* VFD: a car dashboard's smoked glass, blue-green phosphor, filament wires and segmented bar graphs. */
+:root[data-theme="vfd"] {
+  color-scheme: dark;
+  --bg: #030505; --card: #090d0d; --line: #142826; --text: #7dfce8; --dim: #2f8a80;
+  --good: #7dfce8; --warn: #ffc85a; --bad: #ff6b4a; --accent: #5ff0dc; --bar: #041210;
+  --led-off: #071613; --band: #5ff0dc;
+  --k-caller: #a8fff2; --k-answerer: #5ff0dc; --k-ok: #7dfce8; --k-bad: #ff6b4a; --k-unproto: #ffc85a;
+  --glow: 0 0 4px rgba(95, 240, 220, .6), 0 0 12px rgba(95, 240, 220, .25);
+}
+:root[data-theme="vfd"] body { background: radial-gradient(ellipse at 50% 0, #0b1414, #020303 70%); }
+:root[data-theme="vfd"] header { background: linear-gradient(#0c1212, #050808); border-bottom: 1px solid #16302c; }
+:root[data-theme="vfd"] .card {
+  background: linear-gradient(165deg, #0c1312, #050808 60%); border: 1px solid #1a2826; border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), inset 0 0 0 7px #020303, inset 0 0 0 8px #12221f, 0 10px 26px rgba(0, 0, 0, .7);
+}
+:root[data-theme="vfd"] h2, :root[data-theme="vfd"] .tile label { color: #2f8a80; letter-spacing: .22em; font-size: 10px; }
+:root[data-theme="vfd"] .tile {
+  background: linear-gradient(#021210, #010605); border: 1px solid #0d2421; border-radius: 6px;
+  box-shadow: inset 0 3px 12px rgba(0, 0, 0, .9);
+}
+/* Dash icons: printed legends that light up, no pill behind them. */
+:root[data-theme="vfd"] .led { background: transparent; border: 1px solid #0f2a26; color: #0f3a35; letter-spacing: .2em; }
+:root[data-theme="vfd"] .led.on { color: var(--warn); border-color: currentColor; text-shadow: 0 0 6px currentColor; background: transparent; }
+:root[data-theme="vfd"] .led.ptt.on, :root[data-theme="vfd"] .led.clip.on { color: var(--bad); }
+:root[data-theme="vfd"] .bar { background: repeating-linear-gradient(90deg, rgba(95, 240, 220, .07) 0 5px, transparent 5px 7px), #020605; }
+:root[data-theme="vfd"] .fill {
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px);
+  filter: drop-shadow(0 0 3px rgba(95, 240, 220, .7));
+}
+.disp.vfd {
+  position: relative; padding: 3px 4px; --dot: 3px; --seg: 28px;
+  background: repeating-linear-gradient(90deg, rgba(120, 255, 240, .025) 0 1px, transparent 1px 3px);
+}
+.state + .disp.vfd { --dot: 3.5px; --seg: 28px; }
+.clock + .disp.vfd { --dot: 2.5px; --seg: 22px; }
+.val + .disp.vfd, #drive-val + .disp.vfd { --dot: 2px; --seg: 14px; }
+.disp.vfd canvas { display: block; width: auto; }
+/* The two filament wires strung across the glass in front of the grid. */
+.disp.vfd::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(transparent calc(33% - .5px), rgba(210, 255, 250, .13) 33%, transparent calc(33% + .5px),
+    transparent calc(68% - .5px), rgba(210, 255, 250, .13) 68%, transparent calc(68% + .5px));
+}
+/* Art deco: gold sunburst, double-ruled frames with stepped corners, speed-line rules and brass drum counters. */
+:root[data-theme="deco"] {
+  --bg: #08100d; --card: #0d1512; --line: #2c3a33; --text: #efe6cf; --dim: #a99a70; --accent: #d4af37;
+  --gold: #d4af37; --gold-hi: #f3dc8c; --gold-lo: #8a6a24;
+}
+:root[data-theme="deco"] body {
+  background:
+    repeating-conic-gradient(from -90deg at 50% -10%, rgba(212, 175, 55, .07) 0deg 2deg, transparent 2deg 7deg),
+    radial-gradient(ellipse at 50% -10%, #1b2a22, #08100d 70%);
+  background-attachment: fixed;
+  font-family: "Bahnschrift", "Futura", "Century Gothic", "Segoe UI", sans-serif;
+}
+:root[data-theme="deco"] header {
+  background: linear-gradient(#0f1a15, #08100d); border-bottom: 1px solid var(--gold);
+  box-shadow: 0 3px 0 #08100d, 0 4px 0 var(--gold);
+}
+:root[data-theme="deco"] .brand {
+  font-family: "Bahnschrift", "Futura", "Century Gothic", sans-serif; text-transform: uppercase;
+  letter-spacing: .45em; color: var(--gold); text-shadow: none;
+}
+:root[data-theme="deco"] .brand::before {
+  content: ""; display: inline-block; width: 26px; height: 13px; margin-right: 12px; vertical-align: -1px;
+  border-radius: 26px 26px 0 0; /* a rising-sun fan */
+  background: repeating-conic-gradient(from -90deg at 50% 100%, var(--gold) 0deg 6deg, transparent 6deg 15deg);
+}
+:root[data-theme="deco"] .card {
+  position: relative; background: linear-gradient(170deg, #101a16, #0a120f); border: 1px solid var(--gold);
+  border-radius: 0; box-shadow: inset 0 0 0 5px #0a120f, inset 0 0 0 6px rgba(212, 175, 55, .55), 0 12px 28px rgba(0, 0, 0, .6);
+  padding: 22px 24px;
+}
+/* Stepped ziggurat corners, drawn as gold bars at each corner. */
+:root[data-theme="deco"] .card::before {
+  content: ""; position: absolute; inset: -1px; pointer-events: none;
+  --s: linear-gradient(var(--gold), var(--gold));
+  background:
+    var(--s) 0 0 / 22px 3px, var(--s) 0 0 / 3px 22px, var(--s) 6px 6px / 12px 2px, var(--s) 6px 6px / 2px 12px,
+    var(--s) 100% 0 / 22px 3px, var(--s) 100% 0 / 3px 22px, var(--s) calc(100% - 6px) 6px / 12px 2px, var(--s) calc(100% - 6px) 6px / 2px 12px,
+    var(--s) 0 100% / 22px 3px, var(--s) 0 100% / 3px 22px, var(--s) 6px calc(100% - 6px) / 12px 2px, var(--s) 6px calc(100% - 6px) / 2px 12px,
+    var(--s) 100% 100% / 22px 3px, var(--s) 100% 100% / 3px 22px, var(--s) calc(100% - 6px) calc(100% - 6px) / 12px 2px, var(--s) calc(100% - 6px) calc(100% - 6px) / 2px 12px;
+  background-repeat: no-repeat;
+}
+:root[data-theme="deco"] h2 {
+  font-family: "Bahnschrift", "Futura", "Century Gothic", sans-serif; letter-spacing: .38em; color: var(--gold);
+  font-weight: 600; padding-bottom: 10px; position: relative;
+}
+:root[data-theme="deco"] h2::before { content: "\25C6\2009"; font-size: .8em; }
+/* Speed lines: three gold rules of falling length. */
+:root[data-theme="deco"] h2::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 160px; height: 6px;
+  background: linear-gradient(var(--gold), var(--gold)) 0 0 / 100% 1px no-repeat,
+    linear-gradient(var(--gold), var(--gold)) 0 2.5px / 66% 1px no-repeat,
+    linear-gradient(var(--gold), var(--gold)) 0 5px / 33% 1px no-repeat;
+}
+:root[data-theme="deco"] .card-head h2, :root[data-theme="deco"] .log-head h2 { padding-bottom: 10px; }
+:root[data-theme="deco"] .tile {
+  background: #050a08; border: 1px solid rgba(212, 175, 55, .45); border-radius: 0; text-align: center;
+  box-shadow: inset 0 0 0 3px #050a08, inset 0 0 0 4px rgba(212, 175, 55, .2);
+}
+:root[data-theme="deco"] .tile label { color: var(--gold); text-transform: uppercase; letter-spacing: .25em; font-size: 9px; }
+:root[data-theme="deco"] .tile .disp { width: fit-content; margin: 6px auto 0; }
+:root[data-theme="deco"] .btn {
+  border-radius: 0; border-color: var(--gold); color: var(--gold); background: transparent;
+  text-transform: uppercase; letter-spacing: .2em; font-size: 12px;
+}
+:root[data-theme="deco"] .led { border-radius: 0; letter-spacing: .2em; background: transparent; border: 1px solid rgba(212, 175, 55, .3); }
+:root[data-theme="deco"] .led.on { background: var(--gold); color: #08100d; }
+:root[data-theme="deco"] .fill { background: linear-gradient(90deg, #8a6a24, var(--gold) 70%, #f3dc8c 85%, #c56b5b 92%); }
+.disp.drum {
+  gap: 1px; padding: 3px; font-size: 22px; border-radius: 3px;
+  background: linear-gradient(var(--gold-hi, #f3dc8c), var(--gold-lo, #8a6a24));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .5);
+}
+.state + .disp.drum { font-size: 26px; }
+.clock + .disp.drum { font-size: 17px; }
+.val + .disp.drum, #drive-val + .disp.drum { font-size: 12px; }
+.disp.drum .wheel {
+  position: relative; display: inline-block; width: .68em; height: 1.2em; overflow: hidden; flex: none;
+  font-family: "Bahnschrift SemiCondensed", "Bahnschrift", "Arial Narrow", sans-serif; font-weight: 600;
+  line-height: 1.2em; text-align: center; color: #f4ead0; text-shadow: none;
+  background: linear-gradient(#000, #2a241c 22%, #3a3228 50%, #2a241c 78%, #000);
+}
+.disp.drum .wheel.fixed { width: .45em; }
+.disp.drum .strip { display: flex; flex-direction: column; transition: transform .55s cubic-bezier(.3, 1.4, .5, 1); }
+.disp.drum .strip span { height: 1.2em; flex: none; }
+/* The drum's curve: shade the top and bottom of the window. */
+.disp.drum .wheel::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(rgba(0, 0, 0, .75), transparent 32%, rgba(255, 255, 255, .06) 50%, transparent 68%, rgba(0, 0, 0, .75));
+}
+@media (prefers-reduced-motion: reduce) { .disp.drum .strip { transition: none; } }
+
+/* Radar scope: a PPI scope card, a phosphor CRT finish and graticule tiles. */
+:root[data-theme="radar"] body { background: radial-gradient(ellipse at 50% 30%, #061a24, #01060a 75%); }
+:root[data-theme="radar"] h2, :root[data-theme="radar"] .brand { font-family: var(--mono); letter-spacing: .14em; }
+:root[data-theme="radar"] h2::before { content: "\25B8\2002"; color: var(--accent); }
+:root[data-theme="radar"] .card { border-radius: 3px; border-color: #12384f; box-shadow: inset 0 0 30px rgba(0, 0, 0, .7); }
+:root[data-theme="radar"] .tile {
+  border: 1px solid #0f2c40; border-radius: 2px;
+  background:
+    linear-gradient(rgba(34, 211, 238, .06) 1px, transparent 1px) 0 0 / 12px 12px,
+    linear-gradient(90deg, rgba(34, 211, 238, .06) 1px, transparent 1px) 0 0 / 12px 12px, #020d14;
+}
+:root[data-theme="radar"] .tile label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .1em; font-size: 10px; }
+.scope { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; }
+.scope h2 { align-self: flex-start; }
+.scope-bezel {
+  width: min(100%, 460px); aspect-ratio: 1; padding: 14px; border-radius: 50%;
+  background: radial-gradient(circle, #1a2a33 60%, #0a1218 71%, #2a3a44 72%, #0b1319 100%);
+  box-shadow: 0 0 0 2px #050a0e, 0 8px 30px rgba(0, 0, 0, .8), inset 0 2px 3px rgba(255, 255, 255, .12);
+}
+.scope canvas {
+  width: 100%; height: 100%; border-radius: 50%;
+  background: radial-gradient(circle, #04261f, #011410 70%, #000a08);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, .9), inset 0 0 4px rgba(120, 255, 220, .3);
+}
+.scope .hint { max-width: 460px; text-align: center; }
+
+/* Synthwave: an outrun horizon behind the page, a striped sun over a scrolling neon grid, chrome type. */
+:root[data-theme="synthwave"] body { background: linear-gradient(#0d0221 0, #2a0845 45%, #5b1060 62%, #12021f 62.2%); background-attachment: fixed; }
+:root[data-theme="synthwave"] body::before {
+  content: ""; position: fixed; z-index: -1; left: 50%; top: 22vh; width: 46vh; height: 46vh; margin-left: -23vh;
+  border-radius: 50%; pointer-events: none;
+  background: linear-gradient(#ffe86a, #ff9e3d 40%, #ff3f8e 75%, #c41f8a);
+  box-shadow: 0 0 60px rgba(255, 80, 160, .55), 0 0 140px rgba(255, 120, 60, .35);
+  /* The horizontal bands cut out of the sun's lower half, widening toward the horizon. */
+  -webkit-mask-image: linear-gradient(#000 52%, transparent 52% 55%, #000 55% 63%, transparent 63% 67%, #000 67% 74%,
+    transparent 74% 80%, #000 80% 86%, transparent 86% 94%, #000 94%);
+  mask-image: linear-gradient(#000 52%, transparent 52% 55%, #000 55% 63%, transparent 63% 67%, #000 67% 74%,
+    transparent 74% 80%, #000 80% 86%, transparent 86% 94%, #000 94%);
+}
+:root[data-theme="synthwave"] body::after {
+  content: ""; position: fixed; z-index: -1; left: -50%; right: -50%; top: 62vh; height: 80vh; pointer-events: none;
+  transform-origin: 50% 0; transform: perspective(280px) rotateX(62deg);
+  background:
+    linear-gradient(rgba(255, 60, 200, .9) 2px, transparent 2px) 0 0 / 100% 48px,
+    linear-gradient(90deg, rgba(255, 60, 200, .9) 2px, transparent 2px) 0 0 / 48px 100%;
+  -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 70%, transparent);
+  mask-image: linear-gradient(transparent, #000 12%, #000 70%, transparent);
+  animation: synth-grid 1.6s linear infinite;
+}
+@keyframes synth-grid { to { background-position: 0 48px, 0 0; } }
+@media (prefers-reduced-motion: reduce) { :root[data-theme="synthwave"] body::after { animation: none; } }
+:root[data-theme="synthwave"] header { background: rgba(13, 2, 33, .7); border-bottom: 2px solid #ff3fbf; box-shadow: 0 0 14px #ff3fbf; backdrop-filter: blur(6px); }
+:root[data-theme="synthwave"] .card {
+  background: rgba(20, 4, 40, .62); backdrop-filter: blur(8px); border: 1px solid #ff6bcb; border-radius: 4px;
+  box-shadow: 0 0 10px rgba(255, 107, 203, .55), inset 0 0 12px rgba(45, 226, 230, .18);
+}
+:root[data-theme="synthwave"] .tile { background: rgba(8, 0, 20, .7); border: 1px solid rgba(45, 226, 230, .45); box-shadow: inset 0 0 8px rgba(45, 226, 230, .25); }
+/* Chrome type: a mirror gradient with a horizon line through it. */
+:root[data-theme="synthwave"] .brand,
+:root[data-theme="synthwave"] h2,
+:root[data-theme="synthwave"] .state {
+  font-style: italic; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; text-shadow: none;
+  background: linear-gradient(#ffffff 0, #b9e6ff 46%, #3a1460 50%, #ff6bcb 54%, #ffd319 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 4px rgba(255, 60, 200, .6));
+}
+:root[data-theme="synthwave"] .tile b, :root[data-theme="synthwave"] .val {
+  font-style: italic; font-weight: 800; text-shadow: none;
+  background: linear-gradient(90deg, #2de2e6, #ff6bcb); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 5px rgba(45, 226, 230, .6));
+}
+:root[data-theme="synthwave"] .tile label { color: #2de2e6; text-transform: uppercase; letter-spacing: .2em; font-size: 10px; }
+:root[data-theme="synthwave"] .btn {
+  background: transparent; border-color: #2de2e6; color: #2de2e6; text-transform: uppercase; font-style: italic;
+  box-shadow: 0 0 8px rgba(45, 226, 230, .5), inset 0 0 6px rgba(45, 226, 230, .3);
+}
+:root[data-theme="synthwave"] .fill { background: linear-gradient(90deg, #2de2e6, #ff6bcb 75%, #ffd319 92%, #ff2a6d); }
+@media (max-width: 760px) {
+  .disp.flap { font-size: 15px; }
+  .disp.nixie { font-size: 17px; }
+  .disp.vfd { --dot: 2px; --seg: 19px; }
+  .disp.drum { font-size: 16px; }
+  .state + .disp.flap, .state + .disp.nixie { font-size: 20px; }
+  .clock + .disp.flap, .clock + .disp.nixie { font-size: 16px; }
+  .clock + .disp.vfd { --seg: 16px; }
+}
