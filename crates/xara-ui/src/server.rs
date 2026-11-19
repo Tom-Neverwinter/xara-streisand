@@ -4,13 +4,13 @@ use crate::settings::{self, Settings};
 use crate::telemetry::{Control, Controller, Feed};
 use crate::waterfall::Waterfall;
 use crate::ws;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use xara_host::command::valid_call;
@@ -21,6 +21,13 @@ pub(crate) const HISTORY: usize = 500;
 pub const MAX_PAGES: usize = 8;
 pub const MAX_STREAMS: usize = 4;
 pub(crate) const MAX_PENDING: usize = 32;
+/// Max concurrent long-lived connections (pages + streams) from one non-loopback
+/// peer, so a single remote host can't occupy every viewer slot. Loopback (the
+/// local machine's own browser, the common case) is exempt.
+pub(crate) const MAX_PER_PEER: usize = 4;
+/// Max connections one non-loopback peer may have still sending its request, so one host can't hold all
+/// `MAX_PENDING` and stall everyone else for `REQUEST_TIMEOUT`.
+pub(crate) const MAX_PENDING_PER_PEER: usize = 8;
 const MAX_REQUEST: usize = 8192;
 const MAX_FRAME: usize = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -88,6 +95,52 @@ struct Ctx {
     pages: Pages,
     open: [Arc<AtomicUsize>; 2],
     chatting: Arc<AtomicUsize>,
+    peers: Arc<Peers>,
+}
+
+/// Per-peer count of live long-lived connections, keyed by remote IP.
+#[derive(Default)]
+struct Peers(Mutex<HashMap<IpAddr, usize>>);
+
+/// RAII slot in [`Peers`]; the count is decremented when the connection ends.
+/// Loopback peers are not tracked (`ip` is `None`): the local machine may open
+/// as many tabs as the global page/stream pools allow.
+struct PeerSlot {
+    peers: Arc<Peers>,
+    ip: Option<IpAddr>,
+}
+
+impl PeerSlot {
+    /// An untracked slot (loopback, or a peer whose address can't be read).
+    fn exempt(peers: &Arc<Peers>) -> Self {
+        Self { peers: peers.clone(), ip: None }
+    }
+
+    fn take(peers: &Arc<Peers>, ip: IpAddr, max: usize) -> Option<Self> {
+        if ip.is_loopback() {
+            return Some(Self::exempt(peers));
+        }
+        let mut map = peers.0.lock().unwrap_or_else(|e| e.into_inner());
+        let n = map.entry(ip).or_insert(0);
+        if *n >= max {
+            return None;
+        }
+        *n += 1;
+        Some(Self { peers: peers.clone(), ip: Some(ip) })
+    }
+}
+
+impl Drop for PeerSlot {
+    fn drop(&mut self) {
+        let Some(ip) = self.ip else { return };
+        let mut map = self.peers.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = map.get_mut(&ip) {
+            *n -= 1;
+            if *n == 0 {
+                map.remove(&ip);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -100,6 +153,7 @@ struct Client {
     id: u64,
     w: Arc<Writer>,
     _permit: Permit,
+    _peer: PeerSlot,
     kind: Kind,
     waterfall: bool,
     role: Role,
@@ -226,7 +280,7 @@ fn serve(
     }
     let cookie = format!("xara_token_{}", local.port());
     let open = [Arc::default(), Arc::default()];
-    let ctx = Arc::new(Ctx { access, cookie, pages, open, chatting: Arc::default() });
+    let ctx = Arc::new(Ctx { access, cookie, pages, open, chatting: Arc::default(), peers: Arc::default() });
     let (tx, rx) = channel();
     thread::Builder::new().name("ui-hub".into()).spawn(move || hub(src, controls, info, rx))?;
     thread::Builder::new().name("ui-accept".into()).spawn(move || accept(l, tx, ctx))?;
@@ -364,10 +418,13 @@ impl Drop for Permit {
 
 fn accept(l: TcpListener, joins: Sender<Msg>, ctx: Arc<Ctx>) {
     let pending = Arc::new(AtomicUsize::new(0));
+    let pending_peers = Arc::<Peers>::default();
     loop {
         match l.accept() {
-            Ok((s, _)) => {
+            Ok((s, a)) => {
+                let Some(peer) = PeerSlot::take(&pending_peers, a.ip(), MAX_PENDING_PER_PEER) else { continue };
                 let Some(p) = Permit::take(&pending, MAX_PENDING) else { continue };
+                let p = (p, peer);
                 let (j, c) = (joins.clone(), ctx.clone());
                 if thread::Builder::new().spawn(move || handle(s, p, j, &c)).is_err() {
                     thread::sleep(ACCEPT_BACKOFF);
@@ -515,7 +572,7 @@ fn read_request(s: &mut TcpStream) -> Option<Request> {
     }
 }
 
-fn handle(mut s: TcpStream, pending: Permit, joins: Sender<Msg>, ctx: &Ctx) {
+fn handle(mut s: TcpStream, pending: (Permit, PeerSlot), joins: Sender<Msg>, ctx: &Ctx) {
     let r = read_request(&mut s);
     drop(pending);
     if let Some(r) = r {
@@ -573,7 +630,7 @@ fn route(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> io::R
             respond(&mut s, "200 OK", "text/css; charset=utf-8", CHAT_CSS.as_bytes())
         }
         "/chat/ws" => chat_websocket(s, r, ctx),
-        "/stream" => stream(s, joins, ctx),
+        "/stream" => stream(s, r, joins, ctx),
         _ => respond(&mut s, "404 Not Found", "text/plain", b"not found\n"),
     }
 }
@@ -629,12 +686,29 @@ fn same_origin(r: &Request) -> bool {
     origin.split_once("://").is_some_and(|(_, authority)| authority.eq_ignore_ascii_case(host))
 }
 
-fn join(s: &TcpStream, kind: Kind, role: Role, permit: Permit, joins: &Sender<Msg>) -> io::Result<(u64, Arc<Writer>)> {
+/// Claim a per-peer slot for a long-lived connection, or `None` if this peer is
+/// already at [`MAX_PER_PEER`]. A peer whose address can't be read is exempted
+/// rather than refused (the default bind is loopback anyway).
+fn peer_slot(s: &TcpStream, ctx: &Ctx) -> Option<PeerSlot> {
+    match s.peer_addr() {
+        Ok(a) => PeerSlot::take(&ctx.peers, a.ip(), MAX_PER_PEER),
+        Err(_) => Some(PeerSlot::exempt(&ctx.peers)),
+    }
+}
+
+fn join(
+    s: &TcpStream,
+    kind: Kind,
+    role: Role,
+    permit: Permit,
+    peer: PeerSlot,
+    joins: &Sender<Msg>,
+) -> io::Result<(u64, Arc<Writer>)> {
     s.set_read_timeout(if kind == Kind::Ws { Some(WS_IDLE) } else { None })?;
     let _ = s.set_nodelay(true);
     let w = Arc::new(Writer::spawn(s)?);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let c = Client { id, w: w.clone(), _permit: permit, kind, waterfall: false, role };
+    let c = Client { id, w: w.clone(), _permit: permit, _peer: peer, kind, waterfall: false, role };
     joins.send(Msg::Join(c)).map_err(|_| io::Error::other("ui hub stopped"))?;
     Ok((id, w))
 }
@@ -738,6 +812,9 @@ fn websocket(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> i
     let Some(permit) = Permit::take(&ctx.open[0], MAX_PAGES - usize::from(!control)) else {
         return respond(&mut s, "503 Service Unavailable", "text/plain", b"too many pages open\n");
     };
+    let Some(peer) = peer_slot(&s, ctx) else {
+        return respond(&mut s, "503 Service Unavailable", "text/plain", b"too many connections from your address\n");
+    };
     write!(
         s,
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
@@ -748,7 +825,7 @@ fn websocket(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> i
         (false, true) => Role::Locked,
         (false, false) => Role::View,
     };
-    let (id, w) = join(&s, Kind::Ws, role, permit, joins)?;
+    let (id, w) = join(&s, Kind::Ws, role, permit, peer, joins)?;
     let mut rd = ws::Reader::default();
     let shut = |code: u16| w.send(&ws::frame(ws::CLOSE, &code.to_be_bytes()));
     let closed = loop {
@@ -825,15 +902,23 @@ fn chat_websocket(mut s: TcpStream, r: &Request, ctx: &Ctx) -> io::Result<()> {
     Ok(())
 }
 
-fn stream(mut s: TcpStream, joins: &Sender<Msg>, ctx: &Ctx) -> io::Result<()> {
-    let Some(permit) = Permit::take(&ctx.open[1], MAX_STREAMS) else {
+fn stream(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> io::Result<()> {
+    // Reserve one stream slot for an authorized client, as /ws does for pages,
+    // so unauthenticated clients can't take the last slot out from under the
+    // controller. (In an anonymous read-only monitor there is no token, so all
+    // MAX_STREAMS are shared; the per-peer cap below still limits one host.)
+    let control = authorized(r, ctx);
+    let Some(permit) = Permit::take(&ctx.open[1], MAX_STREAMS - usize::from(ctx.access.control && !control)) else {
         return respond(&mut s, "503 Service Unavailable", "text/plain", b"too many streams open\n");
+    };
+    let Some(peer) = peer_slot(&s, ctx) else {
+        return respond(&mut s, "503 Service Unavailable", "text/plain", b"too many connections from your address\n");
     };
     write!(
         s,
         "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
     )?;
-    join(&s, Kind::Stream, Role::View, permit, joins).map(drop)
+    join(&s, Kind::Stream, Role::View, permit, peer, joins).map(drop)
 }
 
 #[cfg(test)]
@@ -963,5 +1048,28 @@ mod tests {
         drop(held);
         assert_eq!(n.load(Ordering::SeqCst), 0);
         assert!(Permit::take(&n, MAX_PENDING).is_some());
+    }
+
+    #[test]
+    fn per_peer_connections_are_capped() {
+        let peers = Arc::<Peers>::default();
+        let ip: IpAddr = Ipv4Addr::new(192, 168, 1, 5).into();
+        let held: Vec<PeerSlot> = (0..MAX_PER_PEER).map_while(|_| PeerSlot::take(&peers, ip, MAX_PER_PEER)).collect();
+        assert_eq!(held.len(), MAX_PER_PEER);
+        assert!(PeerSlot::take(&peers, ip, MAX_PER_PEER).is_none());
+        drop(held);
+        // the map entry is cleaned up, so the peer can connect again
+        assert!(peers.0.lock().unwrap().is_empty());
+        assert!(PeerSlot::take(&peers, ip, MAX_PER_PEER).is_some());
+    }
+
+    #[test]
+    fn loopback_is_exempt_from_per_peer_cap() {
+        let peers = Arc::<Peers>::default();
+        let ip: IpAddr = Ipv4Addr::LOCALHOST.into();
+        let held: Vec<PeerSlot> =
+            (0..MAX_PER_PEER * 4).map_while(|_| PeerSlot::take(&peers, ip, MAX_PER_PEER)).collect();
+        assert_eq!(held.len(), MAX_PER_PEER * 4);
+        assert!(peers.0.lock().unwrap().is_empty());
     }
 }
