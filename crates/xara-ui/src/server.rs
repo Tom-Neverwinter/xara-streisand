@@ -25,6 +25,9 @@ pub(crate) const MAX_PENDING: usize = 32;
 /// peer, so a single remote host can't occupy every viewer slot. Loopback (the
 /// local machine's own browser, the common case) is exempt.
 pub(crate) const MAX_PER_PEER: usize = 4;
+/// Max connections one non-loopback peer may have still sending its request, so one host can't hold all
+/// `MAX_PENDING` and stall everyone else for `REQUEST_TIMEOUT`.
+pub(crate) const MAX_PENDING_PER_PEER: usize = 8;
 const MAX_REQUEST: usize = 8192;
 const MAX_FRAME: usize = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -415,10 +418,13 @@ impl Drop for Permit {
 
 fn accept(l: TcpListener, joins: Sender<Msg>, ctx: Arc<Ctx>) {
     let pending = Arc::new(AtomicUsize::new(0));
+    let pending_peers = Arc::<Peers>::default();
     loop {
         match l.accept() {
-            Ok((s, _)) => {
+            Ok((s, a)) => {
+                let Some(peer) = PeerSlot::take(&pending_peers, a.ip(), MAX_PENDING_PER_PEER) else { continue };
                 let Some(p) = Permit::take(&pending, MAX_PENDING) else { continue };
+                let p = (p, peer);
                 let (j, c) = (joins.clone(), ctx.clone());
                 if thread::Builder::new().spawn(move || handle(s, p, j, &c)).is_err() {
                     thread::sleep(ACCEPT_BACKOFF);
@@ -566,7 +572,7 @@ fn read_request(s: &mut TcpStream) -> Option<Request> {
     }
 }
 
-fn handle(mut s: TcpStream, pending: Permit, joins: Sender<Msg>, ctx: &Ctx) {
+fn handle(mut s: TcpStream, pending: (Permit, PeerSlot), joins: Sender<Msg>, ctx: &Ctx) {
     let r = read_request(&mut s);
     drop(pending);
     if let Some(r) = r {
@@ -902,7 +908,7 @@ fn stream(mut s: TcpStream, r: &Request, joins: &Sender<Msg>, ctx: &Ctx) -> io::
     // controller. (In an anonymous read-only monitor there is no token, so all
     // MAX_STREAMS are shared; the per-peer cap below still limits one host.)
     let control = authorized(r, ctx);
-    let Some(permit) = Permit::take(&ctx.open[1], MAX_STREAMS - usize::from(!control)) else {
+    let Some(permit) = Permit::take(&ctx.open[1], MAX_STREAMS - usize::from(ctx.access.control && !control)) else {
         return respond(&mut s, "503 Service Unavailable", "text/plain", b"too many streams open\n");
     };
     let Some(peer) = peer_slot(&s, ctx) else {

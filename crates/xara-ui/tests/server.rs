@@ -384,8 +384,8 @@ fn a_closed_or_silent_control_page_is_reported_gone() {
 #[test]
 fn streams_and_viewers_cannot_take_the_control_slot() {
     let (_t, addr) = start_with(controlled());
-    let stream = || {
-        let s = open(addr, "GET /stream HTTP/1.1");
+    let stream = |extra: &str| {
+        let s = open(addr, &format!("GET /stream HTTP/1.1{extra}"));
         let mut r = BufReader::new(s.try_clone().unwrap());
         let mut line = String::new();
         while r.read_line(&mut line).unwrap_or(0) > 0 {
@@ -396,8 +396,10 @@ fn streams_and_viewers_cannot_take_the_control_slot() {
         }
         None
     };
-    let streams: Vec<_> = (0..MAX_STREAMS).map(|_| stream().expect("stream refused")).collect();
-    assert!(stream().is_none());
+    // Anonymous streams get all but one slot; the last is kept for the token holder.
+    let mut streams: Vec<_> = (1..MAX_STREAMS).map(|_| stream("").expect("stream refused")).collect();
+    assert!(stream("").is_none());
+    streams.push(stream(&cookie(addr, TOKEN)).expect("token holder's stream refused"));
     let viewers: Vec<_> = (0..MAX_PAGES - 1)
         .map(|_| {
             let (mut s, _) = upgrade(addr, "");
