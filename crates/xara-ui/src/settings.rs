@@ -143,7 +143,7 @@ fn add(out: &mut Pairs, k: String, v: String) -> Result<(), String> {
     }
     if (k == "capture" || k == "playback") && !device_ok(&v) {
         return Err(format!(
-            "{k} {v:?}: not a device name (on Unix: letters, digits and _.,:=@+- only; no file or tee plugin)"
+            "{k} {v:?}: not a device name (on Unix: letters, digits, spaces and _.,:=@+-() only; no file or tee plugin)"
         ));
     }
     out.push((k, v));
@@ -157,8 +157,8 @@ fn device_ok(v: &str) -> bool {
     if cfg!(windows) {
         return v.trim() == v; // empty means unset, as on Unix
     }
-    v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.,:=@+-".contains(&b))
-        && !v.split([':', ',', '=']).any(|t| t == "file" || t == "tee")
+    v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.,:=@+- ()".contains(&b))
+        && !v.split([':', ',', '=']).any(|t| t.trim() == "file" || t.trim() == "tee")
 }
 
 // Used by store() (Unix) and the tests; on a non-test Windows build it is unused.
@@ -214,8 +214,13 @@ mod tests {
             assert!(parse(bad).is_err(), "{bad:?}");
         }
         assert_eq!(
-            parse_save("call N0CALL\n capture  hw:1,0 \nplayback\n").unwrap(),
-            parse(&render(&kv(&[("call", "N0CALL"), ("capture", "hw:1,0"), ("playback", "")]))).unwrap()
+            parse_save("call N0CALL\n capture  BlackHole 2ch \nplayback Built-in Output (Stereo)\n").unwrap(),
+            parse(&render(&kv(&[
+                ("call", "N0CALL"),
+                ("capture", "BlackHole 2ch"),
+                ("playback", "Built-in Output (Stereo)"),
+            ])))
+            .unwrap()
         );
         for bad in ["radio yes", "call A\ncall B"] {
             assert!(parse_save(bad).is_err(), "{bad:?}");
@@ -229,6 +234,9 @@ mod tests {
             "alsa_input.usb-Generic_USB_Audio-00.HiFi__Line__source",
             "xara_rx.monitor",
             "front:CARD=PCH,DEV=0",
+            "BlackHole 2ch",
+            "Built-in Microphone (Internal)",
+            "AppleUSBAudioEngine:Burr-Brown from TI:USB Audio CODEC:14200000:1,2",
         ] {
             assert!(parse(&format!("capture = {dev}\nplayback = {dev}")).is_ok(), "{dev}");
         }
@@ -236,11 +244,13 @@ mod tests {
             "file:'|touch x'",
             "file:'\\174touch x'",
             "file:FILE=x",
+            "file :x",
             "file",
             "tee:null,x",
             "plug:tee:null,x",
+            "plug: tee:null,x",
             "plug:\"hw:1,0\"",
-            "hw:1,0 x",
+            "hw:1,0;x",
             "{type file}",
             "../x",
             "$HOME",

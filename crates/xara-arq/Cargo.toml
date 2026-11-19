@@ -16,3 +16,7 @@ miniz_oxide.workspace = true
 [dev-dependencies]
 xara-host.workspace = true
 xara-testkit.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+unsafe_op_in_unsafe_fn = "deny"

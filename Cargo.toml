@@ -23,6 +23,11 @@ miniz_oxide = "0.8"
 libc = "0.2"
 alsa-sys = "0.3.1"
 
+[workspace.lints.rust]
+# Enforce the edition-2024 default so a future edition change can't silently
+# relax it: every unsafe op inside an unsafe fn needs its own unsafe block.
+unsafe_op_in_unsafe_fn = "deny"
+
 [profile.dev]
 debug = "line-tables-only"
 

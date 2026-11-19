@@ -56,6 +56,7 @@ fn parse() -> Result<Option<Args>, String> {
     let (mut fm, mut hf_given) = (None, false);
     let mut audio = None;
     let (mut blind, mut dump, mut verbose, mut key_idle) = (true, false, false, xara::monitor::KEY_IDLE_S);
+    let mut diag = false;
     let (mut json, mut log) = (false, None);
     let (mut syslog, mut syslog_name) = (None, String::from("xara-monitor"));
     let mut ui = UiArgs::default();
@@ -108,6 +109,7 @@ fn parse() -> Result<Option<Args>, String> {
             }
             "--dump" => dump = true,
             "--verbose" => verbose = true,
+            "--diag" => diag = true,
             "--json" => json = true,
             "--log" => log = Some(PathBuf::from(v()?)),
             "--syslog" => syslog = Some(v()?),
@@ -125,7 +127,7 @@ fn parse() -> Result<Option<Args>, String> {
     if fm.is_some() && hf_given {
         return Err("--hf and --fm cannot both be given".into());
     }
-    let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose };
+    let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose, diag };
     let syslog = syslog.map(|s| (s, syslog_name));
     Ok(Some(Args { input, audio, bw, fm, mon, json, ui, log, syslog }))
 }

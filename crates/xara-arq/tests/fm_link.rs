@@ -72,6 +72,7 @@ impl Sess for fm::Session {
             fm::Tx::Data { record, frames, lead } => {
                 ((((lead + frames.len() * self.bandwidth().level(*record).nsym()) * 1152) as Time), 640)
             }
+            fm::Tx::Tune { .. } => ((((10 + self.bandwidth().level(Record::Connect).nsym()) * 1152) as Time), 640),
         }
     }
 
@@ -83,6 +84,7 @@ impl Sess for fm::Session {
                 let z = frames.iter().filter(|f| *record != Record::Connect && f[f.len() - c] & 0x20 != 0).count();
                 format!("L{record}x{}{}", frames.len(), if z > 0 { "z" } else { "" })
             }
+            fm::Tx::Tune { level_db, .. } => format!("tune{level_db}"),
         }
     }
 
@@ -92,6 +94,7 @@ impl Sess for fm::Session {
             fm::Tx::Data { record, frames, .. } => {
                 Some(Payload::Data(record.index(), frames.into_iter().map(Some).collect()))
             }
+            fm::Tx::Tune { frame, .. } => Some(Payload::Data(Record::Connect.index(), vec![Some(frame)])),
         }
     }
 

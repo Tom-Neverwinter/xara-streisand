@@ -275,25 +275,32 @@ extern "C" fn captured<T: Capture>(
     _: u32,
     _: *const c_void,
 ) {
-    // SAFETY: the AudioQueue owning q keeps user's T alive past its last callback; b has size bytes till re-enqueued.
-    unsafe {
-        let buf = &*b;
-        let user = &*user.cast::<T>();
-        user.captured(slice::from_raw_parts(buf.data.cast::<i16>(), buf.size as usize / 2));
-        if AudioQueueEnqueueBuffer(q, b, 0, null()) != 0 {
-            user.rx_lost();
+    // A panic must not unwind across this extern "C" boundary — doing so aborts
+    // the whole process. Contain it here; the worst case is one dropped buffer.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: the AudioQueue owning q keeps user's T alive past its last callback; b has size bytes till re-enqueued.
+        unsafe {
+            let buf = &*b;
+            let user = &*user.cast::<T>();
+            user.captured(slice::from_raw_parts(buf.data.cast::<i16>(), buf.size as usize / 2));
+            if AudioQueueEnqueueBuffer(q, b, 0, null()) != 0 {
+                user.rx_lost();
+            }
         }
-    }
+    }));
 }
 
 extern "C" fn drained<T: Playback>(user: *mut c_void, q: QueueRef, b: *mut QueueBuffer) {
-    // SAFETY: as in captured; every buffer goes out full, so the one coming back played all of its capacity.
-    unsafe {
-        let (user, frames) = (&*user.cast::<T>(), (*b).capacity as usize / 2);
-        if refill(user, q, b, frames).is_err() {
-            user.tx_lost(frames);
+    // A panic must not unwind across this extern "C" boundary (that aborts the process).
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: as in captured; every buffer goes out full, so the one coming back played all of its capacity.
+        unsafe {
+            let (user, frames) = (&*user.cast::<T>(), (*b).capacity as usize / 2);
+            if refill(user, q, b, frames).is_err() {
+                user.tx_lost(frames);
+            }
         }
-    }
+    }));
 }
 
 unsafe fn refill<T: Playback>(user: &T, q: QueueRef, b: *mut QueueBuffer, played: usize) -> io::Result<()> {

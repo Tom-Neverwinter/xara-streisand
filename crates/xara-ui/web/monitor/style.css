@@ -40,3 +40,7 @@ td.mono { font-family: var(--mono); }
   background: var(--bg); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
 @media (max-width: 760px) { .pl-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* FM mode: hide panels that only apply to the HF decoder (link byte counts,
+   control-frame and key-search tallies, the learned-keys table). */
+body.fm .hf-only { display: none; }

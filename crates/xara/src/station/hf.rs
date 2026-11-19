@@ -167,7 +167,11 @@ impl Station {
                 }
                 broadcast::Event::Sn(sn) => self.c.reports.push_back(Report::Host(HostEvent::Sn(sn))),
                 broadcast::Event::Kiss(cmd, data) => self.c.reports.push_back(Report::Kiss(cmd, data)),
-                broadcast::Event::Cq(c) => self.c.reports.push_back(Report::Line(c.host_line())),
+                broadcast::Event::Cq(c) => {
+                    // NaN: the TNC uses the latest S/N it reported, which the broadcast sends just before.
+                    self.c.reports.push_back(Report::Heard { call: c.call.clone(), what: "CQ", sn: f64::NAN });
+                    self.c.reports.push_back(Report::Line(c.host_line()))
+                }
             }
         }
     }
@@ -477,7 +481,8 @@ impl Modem for Station {
             self.on_unproto_event(ev);
         }
         if self.c.session.next_deadline().is_some_and(|d| d <= self.c.now) {
-            self.c.session.poll(self.c.now);
+            let heard = self.rx_base + self.rx.heard_through48();
+            self.c.session.poll_heard(self.c.now, heard);
         }
         self.drain();
         self.poll_unproto();

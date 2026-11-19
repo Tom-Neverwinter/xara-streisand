@@ -1,5 +1,6 @@
 use crate::station::{HostConfig, Modem, Report, TX_RING_BYTES, secs};
 use xara_arq::compression::Compression;
+use xara_arq::fm::session::AUTOTUNE_LEVELS_DB;
 use xara_arq::host::{HostEvent, LinkBw};
 use xara_arq::kiss;
 use xara_arq::time::{SECOND, Time};
@@ -8,7 +9,7 @@ use xara_host::kiss::KissServer;
 use xara_host::response::{LinkWidth, Response};
 use xara_host::server::{Host, Input};
 use xara_phy::fm::level::FmBandwidth;
-use xara_ui::telemetry::{Bitrate, Control, Event, Telemetry, UI_TUNE_LIMIT};
+use xara_ui::telemetry::{Bitrate, Control, Event, Probe, Telemetry, UI_TUNE_LIMIT};
 const REGISTERED_AFTER: Time = 5 * SECOND;
 pub const HOST_TUNE_LIMIT: Time = 60 * SECOND;
 pub const RESTART_DELAY: Time = 3 * SECOND / 10;
@@ -146,6 +147,7 @@ impl<M: Modem> Tnc<M> {
                     self.say(Response::Wrong);
                 }
                 Input::Data(d) => {
+                    self.stat(|s| s.tx_bytes += d.len() as u64);
                     self.station.send(&d);
                     self.hold_data();
                 }
@@ -255,6 +257,31 @@ impl<M: Modem> Tnc<M> {
                 }
                 ("restart".to_string(), ok)
             }
+            // The page acts on the station directly, so a client on the command port sees only the link events.
+            Control::Connect { remote, vias } => {
+                let mycall = self.station.config().host().mycalls.first().cloned().unwrap_or_default();
+                let ok = !self.station.ptt()
+                    && (vias.is_empty() || M::VIAS)
+                    && !vias.contains(&mycall)
+                    && self.station.connect(&mycall, &remote, &vias);
+                (format!("connect {remote}"), ok)
+            }
+            Control::Disconnect => {
+                self.station.disconnect();
+                ("disconnect".to_string(), true)
+            }
+            Control::Listen(on) => {
+                self.station.set_listen(on);
+                (format!("listen {}", if on { "on" } else { "off" }), true)
+            }
+            Control::Cq => {
+                let mycall = self.station.config().host().mycalls.first().cloned().unwrap_or_default();
+                ("cq".to_string(), self.idle() && self.station.cq_frame(&mycall, None))
+            }
+            Control::Probe { target, vias, tune } => {
+                let what = format!("{} {target}", if tune { "autotune" } else { "ping" });
+                (what, self.idle() && !self.station.ptt() && self.station.probe(&target, &vias, tune))
+            }
         };
         self.controlled(what, ok);
         self.flush();
@@ -274,8 +301,10 @@ impl<M: Modem> Tnc<M> {
         let cfg = self.station.config();
         let (retries, buffered) = (cfg.host().retries, self.station.buffered());
         t.audio(input);
+        let listen = self.station.listen_on();
         t.update(|s| {
             s.now = now;
+            s.listen = listen;
             s.rx.feed(input);
             s.tx.feed(output);
             (s.ptt, s.busy, s.link, s.retries, s.buffered) = (ptt, busy, link, retries, buffered);
@@ -284,6 +313,37 @@ impl<M: Modem> Tnc<M> {
                 s.calls = cfg.host().mycalls.clone();
             }
         });
+    }
+
+    /// Our FM Ping or Autotune was answered (or not). An Autotune answer sets the drive, as VARA FM does.
+    fn probed(&mut self, call: String, sn: Option<f64>, step: Option<u8>) {
+        let drive = step.filter(|s| (1..=10).contains(s)).map(|s| AUTOTUNE_LEVELS_DB[usize::from(s - 1)]);
+        if let Some(db) = drive {
+            self.set_drive(db);
+        }
+        let what = match (sn, step, drive) {
+            (None, ..) => format!("{call}: no answer"),
+            (Some(sn), None, _) => format!("{call} heard us at {sn:.1} dB S/N"),
+            (Some(_), Some(s), Some(db)) => format!("{call}: Autotune step {s}, drive set to {db} dB"),
+            (Some(_), Some(_), None) => format!("{call}: Autotune, no signal"),
+        };
+        self.trace(&what);
+        if let Some(t) = &self.telemetry {
+            t.update(|s| {
+                s.probe = Some(Probe { call, at: s.now, sn, step });
+            });
+        }
+    }
+
+    /// Update the UI's counters for the link in progress, if there is one.
+    fn stat(&self, f: impl FnOnce(&mut xara_ui::telemetry::Session)) {
+        if let Some(t) = &self.telemetry {
+            t.update(|s| {
+                if let Some(cur) = s.session.as_mut() {
+                    f(cur)
+                }
+            });
+        }
     }
 
     fn echo(&self, s: &str) {
@@ -313,10 +373,24 @@ impl<M: Modem> Tnc<M> {
         self.echo(&format!("< {s}"));
         self.host.line(&s);
         let Some(t) = &self.telemetry else { return };
-        match r {
-            Response::Sn(sn) => t.update(|s| s.sn = Some(sn)),
-            Response::Bitrate { level, bps, tx } => t.update(|s| s.bitrate = Some(Bitrate { level, bps, tx })),
-            Response::Disconnected => t.update(|s| (s.sn, s.bitrate) = (None, None)),
+        match &r {
+            Response::Sn(sn) => t.update(|s| s.sn = Some(*sn)),
+            Response::Bitrate { level, bps, tx } => {
+                t.update(|s| s.bitrate = Some(Bitrate { level: *level, bps: *bps, tx: *tx }))
+            }
+            Response::Connected { caller, answerer, .. } => {
+                let me = &self.station.config().host().mycalls;
+                let peer = if me.iter().any(|c| c.eq_ignore_ascii_case(caller)) { answerer } else { caller };
+                t.update(|s| {
+                    s.link_up(peer);
+                    let sn = s.sn;
+                    s.heard(peer, "linked", sn);
+                });
+            }
+            Response::Disconnected => t.update(|s| {
+                (s.sn, s.bitrate) = (None, None);
+                s.link_down();
+            }),
             _ => {}
         }
         t.event(self.station.now(), Event::Host(r));
@@ -517,7 +591,18 @@ impl<M: Modem> Tnc<M> {
                     }
                 }
                 Report::Bitrate { level, bps, tx } => self.say(Response::Bitrate { level, bps, tx }),
-                Report::Host(HostEvent::Data(d)) => self.host.data(&d),
+                Report::Host(HostEvent::Data(d)) => {
+                    self.stat(|s| s.rx_bytes += d.len() as u64);
+                    self.host.data(&d)
+                }
+                Report::Heard { call, what, sn } => {
+                    if let Some(t) = &self.telemetry {
+                        t.update(|s| {
+                            let sn = Some(sn).filter(|v| v.is_finite()).or(s.sn);
+                            s.heard(&call, what, sn)
+                        });
+                    }
+                }
                 Report::Host(HostEvent::Disconnected) => {
                     let deferred = self.deferred_mycall.take();
                     if let Some(Err(Invalid)) = deferred {
@@ -528,6 +613,7 @@ impl<M: Modem> Tnc<M> {
                         self.set_mycalls(calls);
                     }
                 }
+                Report::Host(HostEvent::Probe { call, sn, step }) => self.probed(call, sn, step),
                 Report::Host(HostEvent::UnableToConnect) => self.emit(|| Event::UnableToConnect),
                 Report::Host(HostEvent::TimedOut) => self.emit(|| Event::TimedOut),
                 Report::Host(h) => {
@@ -565,6 +651,7 @@ pub fn response(h: HostEvent) -> Option<Response> {
         | HostEvent::Data(_)
         | HostEvent::Unencrypted
         | HostEvent::RxFrame(_)
-        | HostEvent::Log(_) => return None,
+        | HostEvent::Log(_)
+        | HostEvent::Probe { .. } => return None,
     })
 }

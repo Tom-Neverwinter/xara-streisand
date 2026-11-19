@@ -150,9 +150,8 @@ pub struct Record0 {
     /// Byte 33: in a Reply, the S/N (`snr_byte`) the answering station heard the Ping at; in an AutoTune, the
     /// step (1..=10, each louder than the last).
     pub snr: u8,
-    /// Byte 34 of a Reply to AutoTune, kept whole: the level the answering station reports, 0 = nothing heard
-    /// (VARA FM shows "NO SIGNAL"; 0x10 shows "Drive Level -18 dB"). Real VARA FM sent 0x0c, 0x10 and 0x18 over the
-    /// same clean lab loop (2026-11-18), so the low bits carry information too; their scale is not known yet.
+    /// Byte 34 of a Reply to AutoTune, kept whole: the chosen step << 2 (1..=10). VARA FM shows the step's ramp level
+    /// as its drive (0x10, step 4 = "Drive Level -18 dB"); 0 or a step above 10 shows "NO SIGNAL" (lab, 2026-11-18).
     pub tune: u8,
     pub aes: bool,
     pub compression: u8,

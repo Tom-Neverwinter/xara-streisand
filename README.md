@@ -91,7 +91,9 @@ Every option can also go in a config file (`--config FILE`, `key = value` lines)
 ## Features
 
 - VARA HF 500 / 2300 / 2750 and VARA FM narrow / wide, ARQ sessions and broadcasts
-- web UI for configuration and management (`--ui-port`)
+- web UI for configuration and management (`--ui-port`): meters, waterfall, S/N history, heard stations,
+  session stats and history, nine display themes; with `--ui-control`, connect / disconnect / listen / CQ, and FM
+  Ping and Autotune
 - the usual TCP ports: VARA command/data and KISS
 - FM digipeating (`--digi N1CALL`)
 - recording of RX, TX and PTT to FLAC/WAV (`--record`)
@@ -266,11 +268,23 @@ options:
     --key-idle MIN          max target idle time (default: 30, 0 disables)
     --dump                  dump entire payloads
     --verbose               report unconfirmed blind detections
+    --diag                  per-frame decode stats and raw session headers
     --json                  print newline-delimited JSON records
     --log FILE              append UTC-timestamped output to FILE
     --syslog HOST[:PORT]    also send the log to a syslog server over UDP
     --syslog-name NAME      station name in syslog messages (default: xara-monitor)
     --version and --help    guess
+
+## web UI controls
+
+with `--ui-port` and `--ui-control`, the main page can run the station by
+itself: type a callsign (and up to two digipeaters) and Connect, Disconnect,
+turn Listen on or off, or send a CQ. on FM it also has Ping and Autotune:
+Ping asks a station how well it hears you; Autotune sends VARA FM's ten
+rising bursts, and the answer sets your drive level, as VARA FM does. these
+act on the modem directly, so a client program on the command port only sees
+the link come and go. the page also lists stations heard (CQs, connects,
+pings) and the links since xara started, with their length and bytes.
 
 ## terminal page
 

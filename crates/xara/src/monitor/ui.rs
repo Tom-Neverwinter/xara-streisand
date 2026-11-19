@@ -199,7 +199,16 @@ mod tests {
         h.note(3.0, &ctrl("#D8A3D7", Key::Answerer(0xD8A3D7)));
         h.note(
             4.0,
-            &Record::Header { call: "N0CALL".into(), answerer: "#D8A3D7".into(), flags: 1, start: 4, marker_ok: true },
+            &Record::Header {
+                call: "N0CALL".into(),
+                answerer: "#D8A3D7".into(),
+                flags: 1,
+                start: 4,
+                marker_ok: true,
+                raw: String::new(),
+                unusual: Vec::new(),
+                show_raw: false,
+            },
         );
         h.note(5.0, &ctrl("N0CALL", Key::Caller(1)));
         h.note(6.0, &Record::cq(&Cq { call: String::new(), bw: None }));
