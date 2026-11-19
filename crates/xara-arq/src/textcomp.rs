@@ -192,7 +192,10 @@ pub fn decompress(payload: &[u8]) -> Option<(Vec<u8>, usize)> {
     let mut state = key(&b[..3]).1 as usize + 1;
     let (mut i, mut out) = (3, Vec::new());
     while i < b.len() {
-        let st = &t[state - 1];
+        // Defuse a bad state defensively: a 0 or out-of-range transition (e.g. an
+        // escape with next 0, which unlike an entry is not guarded below) would
+        // otherwise index out of bounds. Fail the decode instead of panicking.
+        let st = t.get(state.wrapping_sub(1))?;
         let (len, hit) =
             (1..=MAX_CODE.min(b.len() - i)).find_map(|l| st.decode.get(&key(&b[i..i + l])).map(|h| (l, *h)))?;
         i += len;
