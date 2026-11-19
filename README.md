@@ -1,11 +1,12 @@
 # xara-streisand
 
-An open, VARA-compatible HF/FM modem for **Linux, macOS, FreeBSD and Windows**, written in Rust.
+An open, VARA-compatible HF/FM modem for **Linux, macOS, FreeBSD, Windows and Android**, written in Rust.
 
 xara-streisand is a maintained fork of [XARA](https://github.com/x0rro/xara) (MIT, by x0rro), which was withdrawn upstream in November 2026. It keeps stations that run VARA HF 4.9.0 and VARA FM 4.4.0 reachable with open software, so Winlink, Pat, VarAC and similar programs can keep using a modem nobody can switch off. The name is a nod to the [Streisand effect](https://en.wikipedia.org/wiki/Streisand_effect).
 
 - **`xara`**: the modem (TNC). It presents VARA's TCP interface: command port 8300, data port 8301, plus a KISS port, so existing VARA client software drives it unchanged.
 - **`xara-monitor`**: a receive-only monitor that decodes VARA HF and FM traffic between other stations. It never transmits.
+- **the Android app**: both, plus Pat (the Winlink client), on a phone with a USB sound card; see [docs/android.md](docs/android.md).
 
 Tested against VARA HF 4.9.0 and VARA FM 4.4.0. Help is welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -16,9 +17,9 @@ The aim is full compatibility with the entire VARA family, in one program that a
 | VARA product | xara today |
 |---|---|
 | VARA HF (500 / 2300 / 2750) | Working. Decodes real on-air VARA HF, including full Winlink sessions |
-| VARA FM (narrow / wide) | Working xara-to-xara. Interop with real VARA FM still unproven |
+| VARA FM (narrow / wide) | Working. Proven against real VARA FM 4.4.1 in a lab loopback |
 | VARA SAT | Yes (`--hf sat`): links with real VARA SAT 4.4.5, calling and answering; monitor too |
-| VARA Chat / VARA Terminal | xara speaks their TCP interface. End-to-end tests against the real apps are still pending |
+| VARA Chat / VARA Terminal | Working: run end to end against the real apps (as are Pat and VarAC) |
 | Winlink Express, Pat, VarAC, other VARA clients | Point them at `127.0.0.1:8300` (the default; change it with `--port N` and `--addr A`, or `port = N` in the config file. Data is on N+1) |
 
 The full feature-by-feature chart, with the test behind each line and the open gaps in priority order, is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Pick a gap up, see [CONTRIBUTING.md](CONTRIBUTING.md).
