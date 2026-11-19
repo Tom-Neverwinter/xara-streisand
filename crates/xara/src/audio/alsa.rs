@@ -446,7 +446,7 @@ impl Handle {
         let stream = if dir == Direction::Capture { sys::SND_PCM_STREAM_CAPTURE } else { sys::SND_PCM_STREAM_PLAYBACK };
         let mut p = ptr::null_mut();
         // SAFETY: name is a C string and p is kept only once snd_pcm_open succeeds.
-        check("snd_pcm_open", unsafe { sys::snd_pcm_open(&mut p, name.as_ptr(), stream, sys::SND_PCM_NONBLOCK) })?;
+        check("snd_pcm_open", unsafe { sys::snd_pcm_open(&mut p, name.as_ptr(), stream, sys::SND_PCM_NONBLOCK as _) })?;
         Ok(Self(p))
     }
 
