@@ -68,7 +68,11 @@ pub fn open(path: &str, baud: u32, stop_bits: u8) -> io::Result<Port> {
             return Err(fail("fcntl"));
         }
     }
-    crate::ptt::modem(&f, libc::TIOCMBIC, libc::TIOCM_RTS | libc::TIOCM_DTR)?;
+    // A port without modem lines (a pty, a socat or Bluetooth link to a rig) still carries CAT.
+    match crate::ptt::modem(&f, libc::TIOCMBIC, libc::TIOCM_RTS | libc::TIOCM_DTR) {
+        Err(e) if matches!(e.raw_os_error(), Some(libc::ENOTTY | libc::EINVAL)) => {}
+        r => r?,
+    }
     Ok(Port { f })
 }
 

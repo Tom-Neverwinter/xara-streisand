@@ -118,7 +118,7 @@ VARA FM's `FM Mode` setting is 1 for narrow and 2 for wide.
 | Audio | Windows sound cards | ✅ PulseAudio/PipeWire, ALSA, CoreAudio, WinMM, (tr)uSDX |
 | Left / right / both sound-card channel | ✅ | ✅ `--channel left\|right\|both` on WinMM, PulseAudio, ALSA and CoreAudio (not (tr)uSDX) |
 | PTT: serial RTS/DTR, CM108 GPIO, VOX | ✅ | ✅ (CM108 by USB id on macOS and Windows) |
-| PTT / tuning via CAT | ✅ Chat/Terminal rig lists | ✅ via hamlib `rigctld`; built-in CAT (`--cat`, `--ptt cat`) |
+| PTT / tuning via CAT | ✅ Chat/Terminal rig lists | ✅ via hamlib `rigctld`; built-in CAT (`--cat`, `--ptt cat`), each protocol tested against an emulated rig over a pseudo-terminal (`cat_emulator.rs`), not yet on a real rig |
 | Remote Syslog client | ✅ (registered only) | ✅ `--syslog` |
 | Setup screen | ✅ GUI | Web UI ✅; first-run wizard ✅; Windows settings save ✅ |
 | Several instances on separate ports | ✅ one folder per instance | ✅ `--port N` (data on N+1), `--kiss-port`, `--config` |

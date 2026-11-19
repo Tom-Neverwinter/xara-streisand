@@ -4,6 +4,7 @@
 
 maintained fork of x0rro/xara after upstream was withdrawn.
 
+- built-in CAT: each protocol (Icom CI-V with USB echo, Kenwood/Elecraft, newer Yaesu, FT-817 5-byte) is tested tuning and keying an emulated rig over a pseudo-terminal; CAT ports without modem lines (socat, Bluetooth) now open on Linux/macOS
 - VARA SAT receive: `xara-monitor --hf sat` decodes VARA SAT 4.4.5 data frames (its own level table, tables, whitening and control codebook), checked against recordings of two real VARA SAT stations, including every control code on the link; `xara --hf sat` links with real VARA SAT 4.4.5, calling and answering (G10; checked over a virtual audio cable, unregistered so up to L4)
 - FM: decodes through a handheld receiver that is still settling after transmitting (gain rising over the frame, a low-frequency thump): the QAM equaliser now follows the noise floor row by row (G8). Before, the top levels lost about one frame in three behind such a receiver near their noise limit
 - Windows: the TNC runs natively (WinMM audio; serial RTS/DTR, rigctld and VOX PTT; console Ctrl-C), and `xara-monitor` plus its web UI build and run there
