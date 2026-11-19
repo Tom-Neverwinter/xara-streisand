@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
+use xara_host::command::valid_call;
 use xara_host::writer::Writer;
 
 pub const TICK: Duration = Duration::from_millis(100);
@@ -396,7 +397,7 @@ fn hub(mut src: impl Source, mut controls: Option<Box<dyn Controls>>, info: Info
                 continue;
             }
             Ok(Msg::Control(id, ctl)) => {
-                let what = label(ctl);
+                let what = label(&ctl);
                 if let Some(c) = clients.iter().find(|c| c.id == id) {
                     match controls.as_mut() {
                         Some(k) if c.role == Role::Control => {
@@ -651,20 +652,48 @@ fn command(text: &str) -> Option<Cmd<'_>> {
         "DEVICES ?" => Cmd::Settings(Query::Devices),
         "SETTINGS SAVE" => Cmd::Settings(Query::Save(body)),
         "SETTINGS RESET" => Cmd::Settings(Query::Reset),
+        "DISCONNECT" => Cmd::Control(Control::Disconnect),
+        "LISTEN ON" => Cmd::Control(Control::Listen(true)),
+        "LISTEN OFF" => Cmd::Control(Control::Listen(false)),
+        "CQ" => Cmd::Control(Control::Cq),
         l => {
-            let db = l.strip_prefix("DRIVE ")?.trim().parse::<f64>().ok().filter(|db| db.is_finite())?;
-            Cmd::Control(Control::Drive(db))
+            if let Some(db) = l.strip_prefix("DRIVE ") {
+                let db = db.trim().parse::<f64>().ok().filter(|db| db.is_finite())?;
+                return Some(Cmd::Control(Control::Drive(db)));
+            }
+            let mut w = l.split_whitespace();
+            let verb = w.next()?;
+            // Untrusted page input: every call must be a valid callsign, at most two vias.
+            let calls = w.map(valid_call).collect::<Option<Vec<_>>>()?;
+            let (target, vias) = calls.split_first()?;
+            if vias.len() > 2 {
+                return None;
+            }
+            let (target, vias) = (target.clone(), vias.to_vec());
+            Cmd::Control(match verb {
+                "CONNECT" => Control::Connect { remote: target, vias },
+                "PING" => Control::Probe { target, vias, tune: false },
+                "AUTOTUNE" if vias.is_empty() => Control::Probe { target, vias, tune: true },
+                _ => return None,
+            })
         }
     })
 }
 
-fn label(c: Control) -> String {
+fn label(c: &Control) -> String {
+    let path = |t: &str, v: &[String]| if v.is_empty() { t.to_string() } else { format!("{t} via {}", v.join(" ")) };
     match c {
-        Control::Tune(on) => format!("tune {}", if on { "on" } else { "off" }),
+        Control::Tune(on) => format!("tune {}", if *on { "on" } else { "off" }),
         Control::Drive(db) => format!("drive {db}"),
         Control::Abort => "abort".into(),
         Control::Restart => "restart".into(),
         Control::Left => "left".into(),
+        Control::Connect { remote, vias } => format!("connect {}", path(remote, vias)),
+        Control::Disconnect => "disconnect".into(),
+        Control::Listen(on) => format!("listen {}", if *on { "on" } else { "off" }),
+        Control::Cq => "cq".into(),
+        Control::Probe { target, vias, tune: false } => format!("ping {}", path(target, vias)),
+        Control::Probe { target, tune: true, .. } => format!("autotune {target}"),
     }
 }
 
@@ -834,7 +863,25 @@ mod tests {
         assert_eq!(command("DRIVE -12.5"), Some(Cmd::Control(Control::Drive(-12.5))));
         assert_eq!(command("SETTINGS ?"), Some(Cmd::Settings(Query::Get)));
         assert_eq!(command("SETTINGS SAVE\nMyCall = a\nb"), Some(Cmd::Settings(Query::Save("MyCall = a\nb"))));
-        assert_eq!(label(Control::Drive(-12.5)), "drive -12.5");
+        assert_eq!(label(&Control::Drive(-12.5)), "drive -12.5");
+        let connect = |r: &str, v: &[&str]| Control::Connect {
+            remote: r.into(),
+            vias: v.iter().map(|s| s.to_string()).collect(),
+        };
+        assert_eq!(command("connect w1aw"), Some(Cmd::Control(connect("W1AW", &[]))));
+        assert_eq!(command("CONNECT W1AW N0DIG-1 N1DIG"), Some(Cmd::Control(connect("W1AW", &["N0DIG-1", "N1DIG"]))));
+        assert_eq!(command("LISTEN OFF"), Some(Cmd::Control(Control::Listen(false))));
+        assert_eq!(command("CQ"), Some(Cmd::Control(Control::Cq)));
+        assert_eq!(
+            command("AUTOTUNE N1CALL"),
+            Some(Cmd::Control(Control::Probe { target: "N1CALL".into(), vias: vec![], tune: true }))
+        );
+        assert_eq!(label(&connect("W1AW", &["N0DIG"])), "connect W1AW via N0DIG");
+        for bad in
+            ["CONNECT", "CONNECT W1AW A B C", "CONNECT W1AW;ABORT", "CONNECT <x>", "AUTOTUNE N1CALL N0DIG", "PING"]
+        {
+            assert_eq!(command(bad), None, "{bad}");
+        }
         for bad in ["DRIVE", "DRIVE x", "DRIVE NaN", "DRIVE inf", "TUNE", "MYCALL N0CALL"] {
             assert_eq!(command(bad), None, "{bad:?}");
         }

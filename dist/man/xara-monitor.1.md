@@ -19,6 +19,12 @@ xara-monitor - passive VARA HF traffic monitor
 **xara-monitor** decodes VARA HF sessions between other stations and prints
 timestamped details about the observed packets.
 
+The first data frame after a connect reply is the session header. A header
+whose byte 6 is not zero, whose valid flag is clear or which sets unknown flag
+bits is still shown and followed, with an **[UNUSUAL: ...]** note and its raw
+bytes. If that frame is not a header at all, a **NO HEADER** line gives its
+raw bytes.
+
 # OPTIONS
 
 **--wav** *FILE*
@@ -77,6 +83,14 @@ timestamped details about the observed packets.
 **--verbose**
 
 :   Report unconfirmed blind detections
+
+**--diag**
+
+:   After each DATA line, print one frame line per received frame, decoded
+    or not: the receiver's SN estimate, raw SN, AFC residual and decoder
+    iterations. Shows whether a failed frame was weak or arrived strong
+    and still failed to decode. Also appends the raw bytes of every
+    session header to its HEADER line.
 
 **--json**
 

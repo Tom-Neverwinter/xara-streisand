@@ -298,3 +298,62 @@ fn ui_tune_stops_when_its_page_goes() {
     lab.run_until(0.5, |_| false);
     assert!(!f[0].peek().tuning);
 }
+
+fn fm_lab() -> (Lab<xara::station::fm::Station>, Vec<Feed>) {
+    use xara::station::fm::Station;
+    let mk = |call: &str| {
+        let cfg = xara_arq::fm::Config::new(FmBandwidth::Narrow, call);
+        Tnc::new(Station::new(cfg, Options::default()), Host::bind("127.0.0.1", 0).unwrap())
+    };
+    let mut lab = Lab::with(vec![mk("XX0A"), mk("XX0B")]);
+    let f = feeds(&mut lab);
+    lab.settle();
+    (lab, f)
+}
+
+/// The page links two stations by itself: Listen, Connect, the session counters, the heard list, Disconnect and
+/// the session history.
+#[test]
+fn fm_ui_link_controls_stats_and_history() {
+    let (mut lab, f) = fm_lab();
+    let a = lab.attach(0);
+    lab.settle();
+    f[1].control(Control::Listen(true));
+    lab.settle();
+    assert!(f[1].peek().listen);
+    f[0].control(Control::Connect { remote: "XX0B".into(), vias: vec![] });
+    let al = a.lines.clone();
+    let up = |l: &common::Lines| l.lock().unwrap().iter().any(|l| l.starts_with("CONNECTED XX0A XX0B"));
+    assert!(lab.run_until(30.0, |_| up(&al)), "{:?}", controls(&f[0]));
+    lab.run_until(1.0, |_| false);
+    let s = f[0].peek();
+    assert_eq!(s.session.as_ref().map(|c| c.peer.as_str()), Some("XX0B"));
+    assert!(f[1].peek().heard_list.iter().any(|h| h.call == "XX0A"));
+    f[0].control(Control::Disconnect);
+    let gone = |l: &common::Lines| l.lock().unwrap().iter().any(|l| l == "DISCONNECTED");
+    assert!(lab.run_until(40.0, |_| gone(&al)));
+    let s = f[0].peek();
+    assert!(s.session.is_none());
+    assert_eq!(s.sessions.iter().map(|p| p.session.peer.as_str()).collect::<Vec<_>>(), ["XX0B"]);
+    assert!(controls(&f[0]).contains(&("connect XX0B".to_string(), true)));
+}
+
+/// FM Ping and Autotune from the page, answered by a second xara; Autotune sets the drive to the named step.
+#[test]
+fn fm_ui_ping_and_autotune() {
+    let (mut lab, f) = fm_lab();
+    f[1].control(Control::Listen(true));
+    lab.settle();
+    f[0].control(Control::Probe { target: "XX0B".into(), vias: vec![], tune: false });
+    assert!(lab.run_until(15.0, |_| f[0].peek().probe.is_some()), "{:?}", controls(&f[0]));
+    let p = f[0].peek().probe.unwrap();
+    assert_eq!((p.call.as_str(), p.step), ("XX0B", None));
+    assert!(p.sn.is_some(), "no answer to the Ping");
+
+    f[0].control(Control::Probe { target: "XX0B".into(), vias: vec![], tune: true });
+    lab.settle();
+    assert!(lab.run_until(30.0, |_| f[0].peek().probe.is_some_and(|p| p.step.is_some())));
+    let s = f[0].peek();
+    assert_eq!(s.probe.unwrap().step, Some(4));
+    assert_eq!(s.drive_db, -18.0);
+}

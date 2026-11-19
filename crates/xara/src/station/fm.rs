@@ -12,11 +12,11 @@ use xara_host::command::Bw;
 use xara_phy::busy::Busy;
 use xara_phy::dsp::quantise;
 use xara_phy::fm::ctrl::{Codebook, Side, frame_audio};
-use xara_phy::fm::frame::parse_data;
+use xara_phy::fm::frame::{Kind as RecordKind, Record0, parse_data};
 use xara_phy::fm::level::{DataLevel, FmBandwidth, Record};
 use xara_phy::fm::rx::FS;
 use xara_phy::fm::rx::receiver::{Event, Receiver, Transmission};
-use xara_phy::fm::tx::{IDLE_BEACON_LEAD_IN, Modulator, NFFT, TxOptions, tune_block};
+use xara_phy::fm::tx::{CONNECT_LEAD_IN, IDLE_BEACON_LEAD_IN, Modulator, NFFT, TxOptions, tune_block};
 use xara_ui::telemetry::Link;
 
 const SILENT_TAIL: usize = 45 * 1152;
@@ -38,6 +38,7 @@ pub struct Station {
     reasm: broadcast::Reassembler,
     kiss_rx: bool,
     ignore_dcd: bool,
+    tx_busy: bool,
 }
 
 fn bitrate(bw: FmBandwidth, record: Record, tx: bool) -> Report {
@@ -62,6 +63,7 @@ impl Station {
             reasm: broadcast::Reassembler::default(),
             kiss_rx: false,
             ignore_dcd: false,
+            tx_busy: false,
         };
         s.drain();
         s
@@ -167,8 +169,12 @@ impl Station {
                 )));
                 self.c.reports.push_back(Report::Host(HostEvent::Sn(f.snr_db + SNR_OFFSET_DB)));
                 match self.reasm.push(&f.bytes) {
-                    Some(Received::Cq(c)) if self.c.cfg.host.chat => {
-                        self.c.reports.push_back(Report::Line(c.host_line()))
+                    Some(Received::Cq(c)) => {
+                        let sn = f.snr_db + SNR_OFFSET_DB;
+                        self.c.reports.push_back(Report::Heard { call: c.call.clone(), what: "CQ", sn });
+                        if self.c.cfg.host.chat {
+                            self.c.reports.push_back(Report::Line(c.host_line()))
+                        }
                     }
                     Some(Received::Kiss(cmd, data)) => self.c.reports.push_back(Report::Kiss(cmd, data)),
                     _ => {}
@@ -180,6 +186,16 @@ impl Station {
             {
                 let ok: String = t.frames.iter().map(|f| if f.ok { '+' } else { '-' }).collect();
                 let first = t.frames.iter().find(|f| f.ok);
+                if let Some(r) = first.filter(|_| t.record == Record::Connect).and_then(|f| Record0::parse(&f.bytes)) {
+                    let what = match r.kind {
+                        RecordKind::Connect => "connect",
+                        RecordKind::Ping => "ping",
+                        RecordKind::AutoTune => "autotune",
+                        RecordKind::Reply => "reply",
+                    };
+                    let sn = first.map_or(f64::NAN, |f| f.snr_db + SNR_OFFSET_DB);
+                    self.c.reports.push_back(Report::Heard { call: r.source, what, sn });
+                }
                 let took =
                     t.record == Record::Connect && first.is_some_and(|f| self.digi.on_record0(now, &f.bytes, f.snr_db));
                 if took || self.digi.active() {
@@ -292,6 +308,19 @@ impl Station {
                 let mut r = |n: u32| rng.below(n);
                 (self.modm.transmission(*record, key, &refs, *lead, opt, &mut r), DATA_OVERHANG)
             }
+            fm::Tx::Tune { frame, level_db } => {
+                let bw = self.c.cfg.bw;
+                if self.modm.bw != bw {
+                    self.modm = Modulator::new(bw);
+                }
+                self.c.reports.push_back(bitrate(bw, Record::Connect, true));
+                let key = self.c.session.key();
+                let opt = TxOptions { drive_db: *level_db, pre_signal: false };
+                let rng = &mut self.rng;
+                let mut r = |n: u32| rng.below(n);
+                let x = self.modm.transmission(Record::Connect, key, &[frame.as_slice()], CONNECT_LEAD_IN, opt, &mut r);
+                (x, DATA_OVERHANG)
+            }
         };
         (quantised(x), tail, keyed)
     }
@@ -356,7 +385,9 @@ impl Modem for Station {
         {
             records.push(Record::Connect);
         }
-        if self.kiss_rx && self.c.session.state() == fm::State::Listen && self.c.tx.is_empty() {
+        // CQ and beacon frames ride in record 16 too, so a CHAT ON client (VarAC) needs it without KISS
+        let unproto_rx = self.kiss_rx || self.c.cfg.host.chat;
+        if unproto_rx && self.c.session.state() == fm::State::Listen && self.c.tx.is_empty() {
             records.push(Record::Broadcast);
         }
         self.rx.expect(&records, Some(l.nframes));
@@ -389,6 +420,7 @@ impl Modem for Station {
                     frames.len(),
                     frames.last().map_or(String::new(), |f| level_note(*record, f, self.c.session.has_vias()))
                 ),
+                fm::Tx::Tune { level_db, .. } => format!("tx autotune burst at {level_db} dB"),
             };
             self.c.reports.push_back(Report::Trace(format!("{what} {:?}", self.c.session.state())));
             self.c.tx.stop_tune();
@@ -461,6 +493,13 @@ impl Modem for Station {
         let (t0, n) = (self.c.now, input.len());
         let fed = self.key_block(t0, input, output);
         self.c.now = t0 + n as Time;
+        // apply() leaves record 16 out while TX is queued; with real audio latency the
+        // queue only empties after the unkey delay, so re-arm the receiver then
+        let tx_busy = !self.c.tx.is_empty();
+        if self.tx_busy && !tx_busy {
+            self.refresh_listen();
+        }
+        self.tx_busy = tx_busy;
         let forced = self.c.tx.ptt()
             || !self.c.tx.is_empty()
             || self.c.session.state() != fm::State::Listen
@@ -479,6 +518,16 @@ impl Modem for Station {
         }
         self.drain();
         self.send_unproto();
+    }
+
+    fn probe(&mut self, target: &str, vias: &[String], tune: bool) -> bool {
+        if self.c.session.state() != fm::State::Listen || self.digi.active() {
+            return false;
+        }
+        let me = self.c.cfg.host.primary_call();
+        let ok = self.c.session.probe(self.c.now, &me, target, vias, tune);
+        self.drain();
+        ok
     }
 
     fn connect(&mut self, mycall: &str, remote: &str, vias: &[String]) -> bool {

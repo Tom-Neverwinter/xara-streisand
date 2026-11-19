@@ -42,15 +42,28 @@ impl Drop for Cf {
 }
 
 impl Cf {
+    /// # Safety
+    /// `p` must be either null or a pointer to a live CF object whose ownership
+    /// is transferred to the returned `Cf`. The caller must hold a reference it
+    /// is giving up (a +1 retain count, as from a `Create`/`Copy` function):
+    /// the `Cf` calls `CFRelease` exactly once on drop, so passing a borrowed,
+    /// already-released, or non-CF pointer causes an over-release / invalid free.
     pub unsafe fn owned(p: *const c_void) -> Option<Self> {
         NonNull::new(p.cast_mut()).map(Self)
     }
 
+    /// # Safety
+    /// Same contract as [`Cf::owned`]: `p` is null or a live CF object whose
+    /// +1-retained reference is handed over to the returned `Cf`.
     pub unsafe fn created(p: *const c_void, what: &str) -> io::Result<Self> {
         // SAFETY: the caller hands over one reference to p, or null.
         unsafe { Self::owned(p) }.ok_or_else(|| io::Error::other(format!("{what} failed")))
     }
 
+    /// # Safety
+    /// `p` must be a pointer to a live CF object (not null). A new reference is
+    /// taken with `CFRetain`, so the caller keeps ownership of its own
+    /// reference; the returned `Cf` owns the newly retained one.
     pub unsafe fn retained(p: *const c_void) -> io::Result<Self> {
         // SAFETY: the caller vouches that p is a live CF object, and CFRetain takes a reference of our own.
         unsafe { Self::created(CFRetain(p), "CFRetain") }
@@ -89,6 +102,9 @@ impl Cf {
         }
     }
 
+    /// # Safety
+    /// `self` must wrap a live `CFSet`. The returned pointers borrow the set's
+    /// values; they are valid only while `self` is alive and are not retained.
     pub unsafe fn set_values(&self) -> Vec<*const c_void> {
         // SAFETY: the caller vouches that self is a CFSet, and v has room for all of its values.
         unsafe {
