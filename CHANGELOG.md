@@ -4,6 +4,7 @@
 
 maintained fork of x0rro/xara after upstream was withdrawn.
 
+- Android app (`android/build_apk.py`, CI artifact `xara-android-apk`): the modem and Pat in one APK, monitor (receive only) or TNC (after an explicit transmit confirmation), audio devices listed by name so a USB sound card on OTG is picked from a list, a foreground service that keeps running with the screen off, and the web UIs in-app; tested on an Android 14 emulator
 - Android: run on an Android 14 emulator: linked builds for arm64, armv7 and x86_64 (NDK), the TNC on AAudio, Pat on the same device driving it over `varahf`, and on-device decode of real VARA audio; `docs/android.md` has the recipe
 - built-in CAT: each protocol (Icom CI-V with USB echo, Kenwood/Elecraft, newer Yaesu, FT-817 5-byte) is tested tuning and keying an emulated rig over a pseudo-terminal; CAT ports without modem lines (socat, Bluetooth) now open on Linux/macOS
 - VARA SAT receive: `xara-monitor --hf sat` decodes VARA SAT 4.4.5 data frames (its own level table, tables, whitening and control codebook), checked against recordings of two real VARA SAT stations, including every control code on the link; `xara --hf sat` links with real VARA SAT 4.4.5, calling and answering (G10; checked over a virtual audio cable, unregistered so up to L4)

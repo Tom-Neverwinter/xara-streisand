@@ -104,6 +104,29 @@ jobs:
             target/aarch64-linux-android/release/xara
             target/aarch64-linux-android/release/xara-monitor
 
+  # The Android app: modem + Pat for arm64, armv7 and x86_64, built with the SDK's own tools (android/build_apk.py),
+  # debug-signed. Its command-line rules run on the JVM first (android/test/CommandsTest.java).
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "RUST=$(cat .rust-version)" >> "$GITHUB_ENV"
+      - run: >-
+          rustup toolchain install "$RUST" --profile minimal
+          --target aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: false
+      - name: build the APK
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          RUSTUP_TOOLCHAIN="$RUST" python3 android/build_apk.py --pat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xara-android-apk
+          path: target/android/xara.apk
+
   msrv:
     runs-on: ubuntu-24.04
     steps:
