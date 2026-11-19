@@ -107,10 +107,8 @@ fn snr_sweep_500() {
                 let mut ev: Vec<Event> = x.chunks(480).flat_map(|b| rx.feed(b)).collect();
                 ev.extend(rx.flush());
                 for e in &ev {
-                    if let Event::Frame(f) = e
-                        && f.frame.ok
-                        && f.frame.bytes == frame
-                    {
+                    let Event::Frame(f) = e else { continue };
+                    if f.frame.ok && f.frame.bytes == frame {
                         ok += 1;
                         est.push(f.frame.snr_db);
                     }
