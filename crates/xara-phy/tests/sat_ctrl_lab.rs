@@ -1,6 +1,7 @@
 //! VARA SAT 4.4.5's codebook against a recorded link between two real stations (lab, 2026-11-18: N0CALL calls
 //! N1CALL, sends text, N1CALL quits). SAT sends one tone per symbol; these are the tones heard (46.875 Hz grid).
 use xara_phy::call::call_hash;
+use xara_phy::hf::ctrl::code::{BREAK, IDLE};
 use xara_phy::hf::ctrl::{Codebook, Codeword, Fmt, Role};
 use xara_phy::hf::level::Bandwidth;
 
@@ -42,15 +43,15 @@ fn sat_codebook_matches_a_recorded_link() {
         assert_eq!(heard(answerer.rx(f, code)), tones(want), "caller tx {code}");
     }
     assert_eq!(
-        heard(caller.tx(f, 48)),
+        heard(caller.tx(f, BREAK)),
         tones("26 27 26 45 44 13 22 45 52 33 44 13 50 13 32 33 50 21 46 31 48 31 38 37 24 23 22 17 38 47 28")
     );
     assert_eq!(
-        heard(caller.rx(f, 48)),
+        heard(caller.rx(f, BREAK)),
         tones("50 19 20 37 52 33 34 27 18 21 32 43 12 47 50 43 26 43 24 51 14 19 44 25 18 31 26 33 20 25 42")
     );
     assert_eq!(
-        heard(caller.rx(f, 49)),
+        heard(caller.rx(f, IDLE)),
         tones("48 21 22 37 22 13 34 11 40 17 28 41 32 23 44 41 26 41 52 33 48 41 42 21 16 25 26 11 40 31 38")
     );
 }

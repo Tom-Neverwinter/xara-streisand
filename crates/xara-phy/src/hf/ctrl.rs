@@ -197,8 +197,9 @@ pub fn family(code: u32, bw: Bandwidth) -> u32 {
 
 /// VARA SAT generates codes 1..=47 in its main book (HF: 1..=58).
 pub const SAT_CODES: u32 = 47;
-/// SAT's per-link codes, generated as HF's BREAK and IDLE are (their meaning in SAT is inferred).
-pub const SAT_CONNECT_CODES: [u32; 2] = [48, 49];
+/// SAT's per-link codes, generated as HF's BREAK and IDLE are and used as they are: on a recorded SAT link the
+/// answerer sends the first after the header and the second when it has nothing to send.
+pub const SAT_CONNECT_CODES: [u32; 2] = [code::BREAK, code::IDLE];
 /// Seed of SAT's code 47 (HF seeds code 47 with 0xCD80A4).
 pub const SAT_SEED_47: u64 = 0x0192_AD1A;
 
@@ -357,7 +358,7 @@ impl Codebook {
         cb
     }
 
-    /// SAT's per-link codes: seeded as HF's BREAK/IDLE, stored as 48/49 (their meaning in SAT is inferred).
+    /// SAT's per-link codes, BREAK and IDLE, seeded as HF's.
     pub fn set_sat_connect_codes(&mut self, seed_value: u32, role: Role) {
         let side_off = [connect_off(role.peer()), connect_off(role)].map(u64::from);
         let mut r = VbRnd::new();
@@ -431,4 +432,18 @@ pub fn atu_tone(fmt: Fmt) -> Vec<f64> {
     let tone = synth(&[[TONE_BIN].into_iter().collect(); ATU_SYMBOLS], &[]);
     let scale = 1.0 / fmt.params().norm();
     tone.iter().map(|v| v * scale).chain(std::iter::repeat_n(0.0, ATU_SILENT_SYMBOLS * SYMBOL_SAMPLES)).collect()
+}
+
+/// A VARA SAT control frame. SAT's symbols are HF's at half the length with the same tone numbers, so this is
+/// HF's synthesis with every other sample kept. A call opens with the tuner tone, every other frame with the
+/// 10-symbol preamble (both as heard from VARA SAT, see `crate::sat`); SAT sends only `Fmt::F0`.
+pub fn sat_frame_audio(cb: &Codebook, code: u32) -> Vec<f64> {
+    let f = Fmt::F0.params();
+    let scale = 2.0 * f.ntones as f64 / f.norm();
+    let head: Vec<Symbol> = if code == code::CONNECT_REQ_2300 {
+        vec![[crate::sat::TUNE_TONE].into_iter().collect(); crate::sat::TUNE_SYMBOLS]
+    } else {
+        crate::sat::preamble().into_iter().map(|k| [k].into_iter().collect()).collect()
+    };
+    synth(&head, cb.tx(Fmt::F0, code)).iter().step_by(2).map(|v| v * scale).collect()
 }

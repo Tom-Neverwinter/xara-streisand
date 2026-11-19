@@ -66,3 +66,43 @@ fn differs_from_hf_2300_and_is_pinned() {
     }
     assert_eq!(sha256_hex(&all), "5e3b0866ad582a2d691c8661950ba885414643c8385242d84f8068304b0bb41a");
 }
+
+/// The connect request xara sends is the one heard from VARA SAT (`sat.rs`), tuner tone and all.
+#[test]
+fn sat_connect_request_audio_matches_vara() {
+    let caller = Codebook::new_sat(call_hash(b"N1CALL"), [call_hash(b"N0CALL"), 0, 0, 0, 0], Role::Caller);
+    let x = xara_phy::hf::ctrl::sat_frame_audio(&caller, 26);
+    let want = xara_phy::sat::synth(&xara_phy::sat::request_tones("N1CALL", true));
+    assert_eq!(x.len(), want.len());
+    let k = x[100] / want[100];
+    assert!(x.iter().zip(&want).all(|(a, b)| (a - k * b).abs() < 1e-9));
+}
+
+/// Every SAT control code xara sends is heard by a SAT receiver listening for the other side's book, through noise.
+#[test]
+fn every_sat_control_code_loops_back() {
+    use xara_phy::hf::rx::ctrl::rx_entries;
+    use xara_phy::hf::rx::receiver::{Event, Receiver};
+    let (caller, answerer) = link();
+    let entries: Vec<_> = rx_entries(&answerer, 0).into_iter().filter(|e| e.fmt == Fmt::F0).collect();
+    let mut rng = common::Rng::new(7);
+    let mut missed = Vec::new();
+    // The link's book leaves the other four call hashes at 0, so their connect-request aliases repeat code 27's.
+    let unique = |c: u32| (1..c).all(|d| caller.tx(Fmt::F0, d) != caller.tx(Fmt::F0, c));
+    let heard = |c: u32| caller.tx(Fmt::F0, c) == answerer.rx(Fmt::F0, c) && !caller.tx(Fmt::F0, c).is_empty();
+    for c in codes().filter(|&c| heard(c) && unique(c)) {
+        let mut x = vec![0.0; 12_000];
+        x.extend(xara_phy::hf::ctrl::sat_frame_audio(&caller, c).iter().map(|v| 0.1 * v));
+        x.extend(vec![0.0; 24_000]);
+        x.iter_mut().for_each(|v| *v += 0.02 * rng.gauss());
+        let mut rx = Receiver::new(Bandwidth::Sat, &[], 1, Some(&entries));
+        let mut ev: Vec<Event> = x.chunks(480).flat_map(|b| rx.feed(b)).collect();
+        ev.extend(rx.flush());
+        let got: Vec<u32> =
+            ev.iter().filter_map(|e| if let Event::Ctrl(d) = e { Some(d.det.code) } else { None }).collect();
+        if got != [c] {
+            missed.push((c, got));
+        }
+    }
+    assert!(missed.is_empty(), "{missed:?}");
+}

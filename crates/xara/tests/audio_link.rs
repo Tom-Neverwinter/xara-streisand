@@ -98,6 +98,13 @@ fn registered_links_climb_over_audio() {
     }
 }
 
+/// Two xara stations link over VARA SAT: SAT control codes both ways, SAT data frames, and the QRT.
+#[test]
+fn sat_link_over_audio() {
+    let air = session(Bandwidth::Sat, true, 0.01, 6000, 800);
+    assert!(air.top_tx(0) >= 5, "{}", air.trace());
+}
+
 #[test]
 fn noisy_link_over_audio() {
     for noise in [0.03, 0.08] {

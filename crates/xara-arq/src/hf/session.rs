@@ -450,6 +450,8 @@ impl Session {
         let k = self.cfg.host.mycalls.len().min(ALIASES as usize) as u32;
         match self.bw {
             Bandwidth::Hz500 => connect_reqs(Bandwidth::Hz500, k).collect(),
+            // SAT numbers its connect request like HF 2300's, and SAT takes only SAT callers.
+            Bandwidth::Sat => connect_reqs(Bandwidth::Sat, k).collect(),
             // Wide stations take 500 Hz callers too and answer them at 500 (on_request).
             _ => connect_reqs(Bandwidth::Hz2300, k)
                 .chain(connect_reqs(Bandwidth::Hz2750, k))
@@ -873,7 +875,7 @@ impl Session {
             return;
         }
         let bw = match req_bw {
-            Bandwidth::Hz2300 if self.bw == Bandwidth::Hz500 => self.bw,
+            Bandwidth::Hz2300 if matches!(self.bw, Bandwidth::Hz500 | Bandwidth::Sat) => self.bw,
             Bandwidth::Hz2750 => self.bw,
             b => b,
         };
@@ -973,7 +975,11 @@ impl Session {
 
     fn on_reply(&mut self, c: CtrlIn) {
         let Some((reply_bw, q)) = connect_reply_q(c.code) else { return };
-        let bw = if reply_bw == Bandwidth::Hz2300 && self.bw == Bandwidth::Hz500 { self.bw } else { reply_bw };
+        let bw = if reply_bw == Bandwidth::Hz2300 && matches!(self.bw, Bandwidth::Hz500 | Bandwidth::Sat) {
+            self.bw
+        } else {
+            reply_bw
+        };
         self.switch_bw(bw);
         let q = Record::clamped(q as usize, Record::MAX);
         self.link.comp = if self.cfg.host.registered { self.cfg.host.compression } else { Compression::Off };
@@ -1015,7 +1021,13 @@ impl Session {
             BREAK => {
                 self.link_up(now);
                 let fmt = format_for_level(self.bw, self.level);
-                self.send_ctrl(start_level_code(self.carry.offered.get() as u32), fmt, 0);
+                // SAT has no start-level codes; its caller hands the turn over with GO AHEAD (recorded SAT link).
+                let code = if self.bw == Bandwidth::Sat {
+                    GO_AHEAD
+                } else {
+                    start_level_code(self.carry.offered.get() as u32)
+                };
+                self.send_ctrl(code, fmt, 0);
                 self.enter(State::Receiving);
             }
             IDLE => {
