@@ -25,7 +25,7 @@ pub struct FrameDecoder {
 
 impl FrameDecoder {
     pub fn new(bw: Bandwidth) -> Self {
-        Self { bw, tables: hf::tables(bw), white: hf::whitening(), turbo: Decoder::default(), early: true }
+        Self { bw, tables: hf::tables(bw), white: hf::whitening(bw), turbo: Decoder::default(), early: true }
     }
 
     pub fn decode(&self, record: Record, llr_tx: &[f64]) -> FrameOut {

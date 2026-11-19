@@ -141,7 +141,9 @@ impl CtrlDetector {
                 let fm = f.params();
                 let mut seen: Vec<(u32, Vec<Vec<usize>>)> = Vec::new();
                 let mut list = Vec::new();
-                let mut sorted: Vec<&CtrlEntry> = entries.iter().filter(|e| e.fmt == f).collect();
+                // SAT leaves some HF code numbers empty; an empty codeword cannot be scored.
+                let mut sorted: Vec<&CtrlEntry> =
+                    entries.iter().filter(|e| e.fmt == f && !e.codeword.is_empty()).collect();
                 sorted.sort_by_key(|e| e.code);
                 for e in sorted {
                     let tones: Vec<Vec<usize>> = e

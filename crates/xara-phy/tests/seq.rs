@@ -33,7 +33,7 @@ fn whitening() {
 fn psk_phasors() {
     let c = load("sequences");
     let v = &c["psk_phasor_index"];
-    let d = seq::psk_phasor_index();
+    let d = seq::psk_phasor_index(seq::HF_SEED);
     for (row, want) in d.iter().zip(v["rows"].as_array().unwrap()) {
         let got: Vec<u32> = row.iter().map(|&x| u32::from(x % 128)).collect();
         assert_eq!(got, words(want));
@@ -44,10 +44,10 @@ fn psk_phasors() {
 #[test]
 fn data_dat_and_ofdm_phasors() {
     let c = load("sequences");
-    let dd = seq::data_dat();
+    let dd = seq::data_dat(seq::HF_SEED);
     assert_eq!(sha256_hex(&dd), c["data_dat"]["sha256"].as_str().unwrap());
     let v = &c["ofdm_phasor_index"];
-    let d = seq::ofdm_phasor_index();
+    let d = seq::ofdm_phasor_index(seq::HF_SEED);
     assert_eq!(sha256_hex(&mod128_bytes(&d)), v["sha256_int8"].as_str().unwrap());
     for (k, want) in (8..13).zip(v["bins_8_12_m_0_15"].as_array().unwrap()) {
         let got: Vec<u32> = d[k][..16].iter().map(|&x| u32::from(x % 128)).collect();

@@ -67,6 +67,9 @@ pub enum Bandwidth {
     Hz500,
     Hz2300,
     Hz2750,
+    /// VARA SAT 4.4.5: HF 2300's engine and passband with SAT's own level table, tables and
+    /// control codebook.  Not in `ALL`, which lists VARA HF's three bandwidths.
+    Sat,
 }
 
 const PASSBAND_CENTRE_HZ: f64 = 1500.0;
@@ -84,6 +87,15 @@ impl Bandwidth {
             Bandwidth::Hz500 => 500,
             Bandwidth::Hz2300 => 2300,
             Bandwidth::Hz2750 => 2750,
+            Bandwidth::Sat => 2300,
+        }
+    }
+
+    /// The name `--hf` takes: "500", "2300", "2750" or "sat".
+    pub fn name(self) -> String {
+        match self {
+            Bandwidth::Sat => "sat".into(),
+            b => b.hz().to_string(),
         }
     }
 
@@ -92,6 +104,7 @@ impl Bandwidth {
             Bandwidth::Hz500 => 13,
             Bandwidth::Hz2300 => 16,
             Bandwidth::Hz2750 => 17,
+            Bandwidth::Sat => 15,
         }
     }
 
@@ -108,6 +121,7 @@ impl Bandwidth {
             Bandwidth::Hz500 => &BW500,
             Bandwidth::Hz2300 => &BW2300,
             Bandwidth::Hz2750 => &BW2750,
+            Bandwidth::Sat => &SAT,
         }
     }
 
@@ -121,6 +135,7 @@ impl Bandwidth {
                 Bandwidth::Hz500 => AMP_NORM_500,
                 Bandwidth::Hz2300 => AMP_NORM_2300,
                 Bandwidth::Hz2750 => AMP_NORM_2750,
+                Bandwidth::Sat => AMP_NORM_SAT,
             }[record.index()],
         )
     }
@@ -130,7 +145,11 @@ impl std::str::FromStr for Bandwidth {
     type Err = String;
 
     fn from_str(b: &str) -> Result<Self, String> {
-        Bandwidth::ALL.into_iter().find(|w| w.hz().to_string() == b).ok_or_else(|| format!("bad bandwidth {b}"))
+        Bandwidth::ALL
+            .into_iter()
+            .chain([Bandwidth::Sat])
+            .find(|w| w.name().eq_ignore_ascii_case(b))
+            .ok_or_else(|| format!("bad bandwidth {b}"))
     }
 }
 
@@ -139,6 +158,26 @@ const AMP_NORM_500: [f32; RECORDS] =
 const AMP_NORM_2300: [f32; RECORDS] = [
     1.41, 1.41, 1.41, 1.41, 0.75, 0.86, 1.73, 2.0, 2.23, 10.44435, 10.44435, 10.44435, 10.44435, 10.44435, 8.82035,
     10.01805, 4.67,
+];
+// SAT's level gains: HF 2300's, shifted down one level like the table.
+const AMP_NORM_SAT: [f32; RECORDS] = [
+    1.41,
+    1.41,
+    1.41,
+    0.75,
+    0.86,
+    1.73,
+    2.0,
+    2.23,
+    AMP_NORM_2300[9],
+    AMP_NORM_2300[10],
+    AMP_NORM_2300[11],
+    AMP_NORM_2300[12],
+    AMP_NORM_2300[13],
+    AMP_NORM_2300[14],
+    AMP_NORM_2300[15],
+    1.41,
+    1.41,
 ];
 const AMP_NORM_2750: [f32; RECORDS] = [
     1.41, 1.41, 1.41, 1.41, 0.75, 0.86, 1.73, 2.0, 2.23, 2.5422, 11.4219, 11.4219, 11.4219, 11.4219, 11.4219, 9.6459,
@@ -311,6 +350,8 @@ pub const fn start_level_max(bw: Bandwidth) -> Record {
     match bw {
         Bandwidth::Hz500 => Record(7),
         Bandwidth::Hz2300 | Bandwidth::Hz2750 => Record(6),
+        // One down, like SAT's level table: real VARA SAT takes a header offering 5 and refuses 6 (lab, 2026-11-19).
+        Bandwidth::Sat => Record(5),
     }
 }
 
@@ -582,3 +623,42 @@ static BW2750: [Level; RECORDS] = [
     snr_corr(ofdm(Ofdm { spf: 155, bps: 4, rate: 7, thr: 15.0, papr: 9.3, k: 26145, ..O2750 }), -1.59),
     snr_corr(ofdm(Ofdm { spf: 155, bps: 5, rate: 6, thr: 18.0, papr: 9.3, k: 31376, ..O2750 }), -0.4),
 ];
+
+/// VARA SAT 4.4.5's level table: HF 2300's engine shifted
+/// down one level, with SAT's own FSK tone bands (bins 12-51 and 6-25 instead of 17-48 and
+/// 9-24), L9's threshold and step-down flags, and two extra FSK levels in place of HF 2300's
+/// L1 and L17.
+static SAT: [Level; RECORDS] = [
+    fsk(Fsk { symbols: 229, bps: 3, rate: 2, sps: 64, first: 12, last: 51, step: 2, thr: -11.2, k: 200, ..FSK }),
+    fsk(Fsk { symbols: 229, bps: 4, rate: 3, sps: 64, first: 12, last: 51, step: 2, thr: -9.4, k: 402, ..FSK }),
+    fsk(Fsk { symbols: 396, bps: 4, rate: 3, sps: 32, first: 6, last: 25, step: 1, thr: -6.6, k: 736, ..FSK }),
+    BW2300[4],
+    BW2300[5],
+    psk(Psk {
+        spf: 355,
+        bps: 2,
+        markers: 6,
+        fc: &[700, 1020, 1340, 1660, 1980, 2300],
+        pulse: RRC2,
+        thr: -0.6,
+        papr: 8.5,
+        k: 2076,
+        ..PSK
+    }),
+    BW2300[7],
+    Level { skip_on_step_down: true, ..BW2300[8] },
+    ofdm(Ofdm { bps: 2, rate: 3, thr: 5.0, papr: 9.4, skip: true, k: 7197, ..O2300 }),
+    Level { skip_on_step_down: false, ..BW2300[10] },
+    BW2300[11],
+    Level { skip_on_step_down: true, ..BW2300[12] },
+    Level { skip_on_step_down: false, ..BW2300[13] },
+    BW2300[14],
+    Level { skip_on_step_down: true, ..BW2300[15] },
+    extra(fsk(Fsk { symbols: 456, bps: 4, rate: 3, sps: 32, first: 6, last: 25, step: 1, thr: -6.6, k: 856, ..FSK })),
+    extra(fsk(Fsk { symbols: 93, bps: 3, rate: 2, sps: 64, first: 12, last: 51, step: 2, thr: -11.2, k: 64, ..FSK })),
+];
+
+/// VARA SAT's 15 normal levels plus its two extra FSK levels (see `SAT`).
+pub fn sat_table() -> &'static [Level; RECORDS] {
+    &SAT
+}

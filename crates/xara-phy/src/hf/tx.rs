@@ -36,7 +36,7 @@ impl Modulator {
         let l = self.bw.level(record);
         let t = &self.tables[record.index()];
         let mut info = frame_bits(frame, l.k as usize);
-        whiten(&mut info, hf::whitening());
+        whiten(&mut info, hf::whitening(self.bw));
         interleave(&turbo_encode(&info, &t.turbo, l.puncture_period(), l.n() as usize), &t.chan)
     }
 
@@ -50,8 +50,8 @@ impl Modulator {
         let txs: Vec<Vec<u8>> = frames.iter().map(|f| self.encode(record, f)).collect();
         let mut x = match l.waveform {
             Waveform::Fsk { .. } => fsk::modulate(l, other, &txs, rand),
-            Waveform::Psk { .. } => psk::modulate(l, other, hf::psk_phasors(), &txs, rand),
-            Waveform::Ofdm { .. } => ofdm::modulate(l, other, hf::ofdm_phasors(), &txs, rand),
+            Waveform::Psk { .. } => psk::modulate(l, other, hf::psk_phasors(self.bw), &txs, rand),
+            Waveform::Ofdm { .. } => ofdm::modulate(l, other, hf::ofdm_phasors(self.bw), &txs, rand),
         };
         let norm = self.bw.amp_norm(record);
         x.iter_mut().for_each(|v| *v /= norm);

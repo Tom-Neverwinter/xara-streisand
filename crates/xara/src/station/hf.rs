@@ -305,7 +305,11 @@ impl Station {
                     self.c.session.set_break_draw(r);
                 }
                 let cb = self.cb.as_ref().expect("codebook before first control frame");
-                (frame_audio(&self.grids, cb, *fmt, *code, *extra), ctrl::gain(*fmt, d))
+                if self.rx.bw == Bandwidth::Sat {
+                    (ctrl::sat_frame_audio(cb, *code), ctrl::gain(Fmt::F0, d))
+                } else {
+                    (frame_audio(&self.grids, cb, *fmt, *code, *extra), ctrl::gain(*fmt, d))
+                }
             }
             Tx::Data { level, frames } => {
                 self.report_bitrate(*level, true);

@@ -8,7 +8,8 @@ pub const PAYLOAD: usize = 6;
 const fn bw_code(bw: Bandwidth) -> u64 {
     match bw {
         Bandwidth::Hz500 => 1,
-        Bandwidth::Hz2300 => 2,
+        // shortcut: SAT's CQ bandwidth code is unknown; assumes 2300's
+        Bandwidth::Hz2300 | Bandwidth::Sat => 2,
         Bandwidth::Hz2750 => 3,
     }
 }

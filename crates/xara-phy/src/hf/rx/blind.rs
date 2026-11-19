@@ -115,7 +115,7 @@ impl BlindDetector {
     pub fn new(bw: Bandwidth) -> Self {
         let families: &[u32] = match bw {
             Bandwidth::Hz500 => &[1],
-            Bandwidth::Hz2300 => &[2],
+            Bandwidth::Hz2300 | Bandwidth::Sat => &[2],
             Bandwidth::Hz2750 => &[2, 3],
         };
         let gates = families

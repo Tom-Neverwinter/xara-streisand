@@ -208,6 +208,9 @@ pub struct Receiver {
     asm: Assembly<FrameRx, Wait>,
     muted: Muted,
     ctrl: Option<CtrlDetector>,
+    /// SAT only: the audio stretched to twice its length, where SAT's control symbols (1024 samples, 46.875 Hz
+    /// grid) become HF's (2048 samples, 23.4375 Hz grid) with the same tone numbers, for the HF control detector.
+    sat_ctrl: Option<(FrontEnd, Track<Complex64>)>,
     dec: FrameDecoder,
     ofdm_stfts: Vec<Stft>,
     pub stats: Stats,
@@ -232,6 +235,7 @@ impl Receiver {
             asm: Assembly::new(nframes),
             muted: Muted::default(),
             ctrl: ctrl.map(|e| CtrlDetector::new(bw, e)),
+            sat_ctrl: (bw == Bandwidth::Sat).then(|| (FrontEnd::new(), Track::new((BUF_SECONDS * FS3) as usize))),
             dec: FrameDecoder::new(bw),
             ofdm_stfts: Stft::hypotheses(),
             stats: Stats::default(),
@@ -247,7 +251,13 @@ impl Receiver {
     pub fn expect(&mut self, records: &[Record], nframes: Option<usize>) {
         for &r in records {
             if !self.engines.contains_key(&r) {
-                let mut e = Engine::new(self.bw, r, &self.dec.tables[r.index()], hf::psk_phasors(), hf::ofdm_phasors());
+                let mut e = Engine::new(
+                    self.bw,
+                    r,
+                    &self.dec.tables[r.index()],
+                    hf::psk_phasors(self.bw),
+                    hf::ofdm_phasors(self.bw),
+                );
                 let back = (self.buf.end() - e.span() - FS3 as i64).max(self.asm.done_until - 64 - FS3 as i64 / 4);
                 e.start_at(self.buf.base.max(back));
                 self.engines.insert(r, e);
@@ -273,7 +283,8 @@ impl Receiver {
             (Some(e), Some(c)) => c.set_entries(e),
             (Some(e), None) => {
                 let mut c = CtrlDetector::new(self.bw, e);
-                c.start_at(self.buf.base.max(self.buf.end() - 40 * 128));
+                let buf = self.ctrl_buf();
+                c.start_at(buf.base.max(buf.end() - 40 * 128));
                 self.ctrl = Some(c);
             }
         }
@@ -281,7 +292,17 @@ impl Receiver {
 
     pub fn heard_through48(&self) -> i64 {
         let end = self.buf.end();
-        to48(self.ctrl.as_ref().and_then(CtrlDetector::settled).map_or(end, |t| t.min(end)))
+        let settled = self.ctrl.as_ref().and_then(CtrlDetector::settled).map(|t| self.ctrl_time(t));
+        to48(settled.map_or(end, |t| t.min(end)))
+    }
+
+    fn ctrl_buf(&self) -> &Track<Complex64> {
+        self.sat_ctrl.as_ref().map_or(&self.buf, |(_, b)| b)
+    }
+
+    /// A control-detector time on the data buffer's clock.
+    fn ctrl_time(&self, t: i64) -> i64 {
+        if self.sat_ctrl.is_some() { t.div_euclid(2) } else { t }
     }
 
     pub fn mute(&mut self, a48: i64, b48: i64) {
@@ -304,8 +325,27 @@ impl Receiver {
         }
         let mut ev = Vec::new();
         let linked = self.linked;
+        if let Some((fe, buf)) = &mut self.sat_ctrl {
+            // Zero-stuffing doubles the length; the front end's low-pass removes the image.
+            let x2: Vec<f64> = x.iter().flat_map(|&v| [2.0 * v, 0.0]).collect();
+            let (m0, b3) = fe.process(&x2);
+            // Frequencies are halved here, and so is the AFC correction.
+            let w = -PI * self.afc_hz / FS3;
+            let v: Vec<Complex64> = b3
+                .iter()
+                .enumerate()
+                .map(|(n, &b)| b * Complex64::from_polar(1.0, w * (m0 + n as i64) as f64))
+                .collect();
+            buf.append(m0, v);
+        }
+        let sat = self.sat_ctrl.is_some();
         if let Some(c) = &mut self.ctrl {
-            for d in c.step(&self.buf, linked) {
+            let buf = self.sat_ctrl.as_ref().map_or(&self.buf, |(_, b)| b);
+            for mut d in c.step(buf, linked) {
+                if sat {
+                    d.t_end = d.t_end.div_euclid(2);
+                    d.df_hz *= 2.0;
+                }
                 if self.ctrl_afc {
                     self.afc_hz += if linked { d.df_hz / 2.0 } else { d.df_hz };
                 }

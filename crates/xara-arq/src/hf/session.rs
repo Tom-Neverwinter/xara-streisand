@@ -450,6 +450,8 @@ impl Session {
         let k = self.cfg.host.mycalls.len().min(ALIASES as usize) as u32;
         match self.bw {
             Bandwidth::Hz500 => connect_reqs(Bandwidth::Hz500, k).collect(),
+            // SAT numbers its connect request like HF 2300's, and SAT takes only SAT callers.
+            Bandwidth::Sat => connect_reqs(Bandwidth::Sat, k).collect(),
             // Wide stations take 500 Hz callers too and answer them at 500 (on_request).
             _ => connect_reqs(Bandwidth::Hz2300, k)
                 .chain(connect_reqs(Bandwidth::Hz2750, k))
@@ -686,7 +688,10 @@ impl Session {
         }
         let draw = self.carry.break_draw.take();
         let w = match self.state {
-            State::Calling => Some(self.carry.timing.reply_window(Fmt::F1)),
+            // VARA SAT's connect reply opens with the tuner tone: about as long as an HF F0 codeword.
+            State::Calling => {
+                Some(self.carry.timing.reply_window(if self.bw == Bandwidth::Sat { Fmt::F0 } else { Fmt::F1 }))
+            }
             State::HeaderSent | State::Sending => Some(match self.req_fmt {
                 Some(_) => self.carry.timing.reply_window(Fmt::F0),
                 None => {
@@ -873,7 +878,7 @@ impl Session {
             return;
         }
         let bw = match req_bw {
-            Bandwidth::Hz2300 if self.bw == Bandwidth::Hz500 => self.bw,
+            Bandwidth::Hz2300 if matches!(self.bw, Bandwidth::Hz500 | Bandwidth::Sat) => self.bw,
             Bandwidth::Hz2750 => self.bw,
             b => b,
         };
@@ -948,7 +953,8 @@ impl Session {
         self.carry.rx_level = d.level;
         self.next_tx_level = Record::clamped(usize::from(h.offer), self.bw.top_level());
         self.offered_by_peer = self.next_tx_level;
-        if !h.valid {
+        // VARA SAT leaves the valid flag clear in every header (two VARA SAT stations link that way).
+        if !h.valid && self.bw != Bandwidth::Sat {
             self.send_ctrl(REJECT, self.fmt, 0);
             self.set_state(State::Qrt);
             return;
@@ -973,10 +979,15 @@ impl Session {
 
     fn on_reply(&mut self, c: CtrlIn) {
         let Some((reply_bw, q)) = connect_reply_q(c.code) else { return };
-        let bw = if reply_bw == Bandwidth::Hz2300 && self.bw == Bandwidth::Hz500 { self.bw } else { reply_bw };
+        let bw = if reply_bw == Bandwidth::Hz2300 && matches!(self.bw, Bandwidth::Hz500 | Bandwidth::Sat) {
+            self.bw
+        } else {
+            reply_bw
+        };
         self.switch_bw(bw);
         let q = Record::clamped(q as usize, Record::MAX);
-        self.link.comp = if self.cfg.host.registered { self.cfg.host.compression } else { Compression::Off };
+        let sat = self.bw == Bandwidth::Sat;
+        self.link.comp = if self.cfg.host.registered && !sat { self.cfg.host.compression } else { Compression::Off };
         let n = match self.cfg.offer_level {
             Some(o) => o.min(self.start_cap(true)),
             None => self.adapt.level_from_snr(f64::from(self.carry.ctrl_snr_held), self.start_cap(true), 3.0),
@@ -994,10 +1005,12 @@ impl Session {
 
     fn send_header(&mut self) {
         let Some(HeaderTx { level: q, offer: n }) = self.header else { return };
+        // VARA SAT sends header flags 00 and reads HF's valid/registered bits as encryption (lab, 2026-11-19).
+        let hf = self.bw != Bandwidth::Sat;
         let h = Header {
             call: self.mycall.clone(),
-            valid: true,
-            registered: self.cfg.host.registered,
+            valid: hf,
+            registered: hf && self.cfg.host.registered,
             comp: self.link.comp.bits(),
             reply: self.carry.reply_fmt.bits(),
             offer: n.get() as u8,
@@ -1015,7 +1028,13 @@ impl Session {
             BREAK => {
                 self.link_up(now);
                 let fmt = format_for_level(self.bw, self.level);
-                self.send_ctrl(start_level_code(self.carry.offered.get() as u32), fmt, 0);
+                // SAT has no start-level codes; its caller hands the turn over with GO AHEAD (recorded SAT link).
+                let code = if self.bw == Bandwidth::Sat {
+                    GO_AHEAD
+                } else {
+                    start_level_code(self.carry.offered.get() as u32)
+                };
+                self.send_ctrl(code, fmt, 0);
                 self.enter(State::Receiving);
             }
             IDLE => {
