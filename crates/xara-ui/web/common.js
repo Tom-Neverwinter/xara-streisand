@@ -32,14 +32,15 @@ const pref = {
 // The third field names the display hardware the readouts are redrawn as (see "Display hardware" below).
 const THEMES = [
   ["airport", "Airport departures board", "flap"], ["nixie", "Nixie tubes", "nixie"], ["vfd", "Car dash VFD", "vfd"],
-  ["sodium", "Sodium lamp"], ["deco", "Art deco"], ["phosphor", "Green phosphor"], ["radar", "Radar scope"],
-  ["synthwave", "Synthwave"], ["paper", "Paper log"], ["contrast", "High contrast"],
+  ["deco", "Art deco", "drum"], ["radar", "Radar scope"], ["synthwave", "Synthwave"],
+  ["sodium", "Sodium lamp"], ["phosphor", "Green phosphor"], ["paper", "Paper log"], ["contrast", "High contrast"],
 ];
 function applyTheme(v) {
   const root = document.documentElement;
   if (v === "system") delete root.dataset.theme;
   else root.dataset.theme = v;
   setDisplay(THEMES.find((t) => t[0] === v)?.[2] ?? null);
+  setExtra(v);
 }
 function initTheme() {
   // ?theme=nixie in the address picks (and keeps) a theme, for a wall display or a kiosk.
@@ -414,8 +415,8 @@ function lineChart(c, points, now, span, lo, hi) {
 }
 
 // ---- Display hardware --------------------------------------------------------------------------------------
-// Three themes redraw every readout as hardware: an airport split-flap board ("flap"), nixie tubes ("nixie") and
-// a car-dash vacuum fluorescent display ("vfd"). The page keeps writing plain text into its readouts; each one is
+// Themes can redraw every readout as hardware: an airport split-flap board ("flap"), nixie tubes ("nixie"), a
+// car-dash vacuum fluorescent display ("vfd") and art deco drum counters ("drum"). The page keeps writing plain text into its readouts; each one is
 // watched, visually hidden by common.css (screen readers still read it) and mirrored into a sibling the theme draws.
 
 const READOUTS = ".tile > b, .state, .meter .val, #drive-val, #clock";
@@ -736,6 +737,190 @@ RENDER.vfd = (r, text) => {
   }
   (numeric ? vfdSegments : vfdMatrix)(r, text, r.color);
 };
+
+// Drum counter (art deco): brass-bezelled number wheels; a digit rolls round its drum to the new value.
+function drumUnit(ch) {
+  const el = document.createElement("span");
+  if (!/[0-9 ]/.test(ch)) {
+    el.className = "wheel fixed";
+    el.textContent = ch;
+    return el;
+  }
+  el.className = "wheel";
+  const strip = document.createElement("span");
+  strip.className = "strip";
+  // 0-9 then a blank, so an unused wheel shows an empty window.
+  for (const d of "0123456789 ") {
+    const s = document.createElement("span");
+    s.textContent = d;
+    strip.append(s);
+  }
+  el.append(strip);
+  return el;
+}
+
+RENDER.drum = (r, text) => {
+  text = text.toUpperCase();
+  r.w = Math.max(r.w, text.length);
+  text = text.padStart(r.w);
+  const key = [...text].map((c) => (/[0-9 ]/.test(c) ? "#" : c)).join("");
+  if (key !== r.key) {
+    r.key = key;
+    r.out.replaceChildren(...[...text].map(drumUnit));
+  }
+  [...text].forEach((c, i) => {
+    const strip = r.out.children[i].firstElementChild;
+    if (strip && strip.className === "strip") strip.style.transform = `translateY(${-(c === " " ? 10 : +c) * 1.2}em)`;
+  });
+};
+
+// Radar scope: a PPI display of the heard stations. Range is S/N (strongest at the centre) and the bearing is
+// derived from the callsign, so each station keeps its place; echoes light as the sweep passes and then fade.
+const scope = { card: null, raf: 0, blips: [], read: 0 };
+
+function scopeAge(text) {
+  const m = /([\d.]+)\s*(s|min|h)/.exec(text);
+  return m ? +m[1] * { s: 1, min: 60, h: 3600 }[m[2]] : 0;
+}
+
+function scopeRead() {
+  const tbody = $("heard");
+  scope.blips = [...(tbody?.rows ?? [])].map((tr) => {
+    const call = tr.cells[0].textContent;
+    let h = 2166136261;
+    for (const ch of call) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+    const sn = parseFloat(tr.cells[2].textContent);
+    const range = Number.isNaN(sn) ? 0.88 : Math.min(0.94, Math.max(0.1, 1 - (sn + 5) / 35));
+    const fade = Math.min(1, Math.max(0.3, 1 - scopeAge(tr.cells[3].textContent) / 1800));
+    return { call, bearing: (h % 3600) / 3600 * 2 * Math.PI, range, fade };
+  });
+}
+
+function scopeStart() {
+  const heard = $("heard")?.closest(".card");
+  if (!heard || scope.card) return;
+  const card = document.createElement("section");
+  card.className = "card scope";
+  card.innerHTML = '<h2>Scope <span class="dim">stations heard</span></h2>' +
+    '<div class="scope-bezel"><canvas></canvas></div>' +
+    '<p class="hint">Range is S/N, strongest at the centre (rings at 20, 10 and 0 dB). The bearing comes from the ' +
+    "callsign, not a direction finder, so each station keeps its place. Older echoes are dimmer.</p>";
+  heard.before(card);
+  scope.card = card;
+  scope.cv = card.querySelector("canvas");
+  scope.read = -Infinity;
+  scope.raf = requestAnimationFrame(scopeFrame);
+}
+
+function scopeStop() {
+  cancelAnimationFrame(scope.raf);
+  scope.card?.remove();
+  scope.card = null;
+}
+
+function scopeFrame(now) {
+  scope.raf = requestAnimationFrame(scopeFrame);
+  if (now - scope.read > 1000) {
+    scope.read = now;
+    scopeRead();
+  }
+  const cv = scope.cv, dpr = window.devicePixelRatio || 1;
+  const size = cv.clientWidth;
+  if (!size) return;
+  if (cv.width !== Math.round(size * dpr)) cv.width = cv.height = Math.round(size * dpr);
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const c = size / 2, R = c - 4;
+  const css = getComputedStyle(document.documentElement);
+  const ink = css.getPropertyValue("--text").trim() || "#8ff3ff";
+  const dim = css.getPropertyValue("--dim").trim() || "#3f8aa0";
+  g.clearRect(0, 0, size, size);
+
+  // Graticule: range rings, cross hairs and bearing ticks, labelled every 30 degrees.
+  g.strokeStyle = dim;
+  g.fillStyle = dim;
+  g.globalAlpha = 0.55;
+  g.lineWidth = 1;
+  g.font = "10px ui-monospace, monospace";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  for (const [sn, label] of [[20, "20"], [10, "10"], [0, "0"]]) {
+    const rr = R * (1 - (sn + 5) / 35);
+    g.beginPath();
+    g.arc(c, c, rr, 0, 2 * Math.PI);
+    g.stroke();
+    g.fillText(label, c + 9, c - rr + 7);
+  }
+  g.beginPath();
+  g.arc(c, c, R, 0, 2 * Math.PI);
+  g.moveTo(c - R, c);
+  g.lineTo(c + R, c);
+  g.moveTo(c, c - R);
+  g.lineTo(c, c + R);
+  g.stroke();
+  for (let d = 0; d < 360; d += 10) {
+    const a = (d - 90) * Math.PI / 180, k = d % 30 ? 0.97 : 0.94;
+    g.beginPath();
+    g.moveTo(c + Math.cos(a) * R, c + Math.sin(a) * R);
+    g.lineTo(c + Math.cos(a) * R * k, c + Math.sin(a) * R * k);
+    g.stroke();
+    if (d % 30 === 0) g.fillText(String(d).padStart(3, "0"), c + Math.cos(a) * R * 0.88, c + Math.sin(a) * R * 0.88);
+  }
+
+  // The sweep (one turn in 4 s) with its afterglow wedge; it stands still if the viewer asked for less motion.
+  const sweep = reduceMotion() ? -Math.PI / 2 : ((now / 4000) % 1) * 2 * Math.PI - Math.PI / 2;
+  const wedge = 1.1;
+  g.globalAlpha = 1;
+  if (g.createConicGradient) {
+    const cg = g.createConicGradient(sweep - wedge, c, c);
+    cg.addColorStop(0, "rgba(0,0,0,0)");
+    cg.addColorStop(wedge / (2 * Math.PI), ink);
+    cg.addColorStop(wedge / (2 * Math.PI) + 0.001, "rgba(0,0,0,0)");
+    g.globalAlpha = 0.28;
+    g.fillStyle = cg;
+    g.beginPath();
+    g.arc(c, c, R, 0, 2 * Math.PI);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  g.strokeStyle = ink;
+  g.shadowColor = ink;
+  g.shadowBlur = 8;
+  g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(c, c);
+  g.lineTo(c + Math.cos(sweep) * R, c + Math.sin(sweep) * R);
+  g.stroke();
+
+  // Echoes: bright as the sweep paints them, decaying over most of a turn.
+  g.fillStyle = ink;
+  g.textAlign = "left";
+  for (const b of scope.blips) {
+    const a = b.bearing - Math.PI / 2;
+    const since = reduceMotion() ? 0.6 : (sweep - a + 4 * Math.PI) % (2 * Math.PI);
+    g.globalAlpha = Math.max(0.12, Math.exp(-since / 2.4)) * b.fade;
+    const x = c + Math.cos(a) * R * b.range, y = c + Math.sin(a) * R * b.range;
+    g.shadowBlur = 12;
+    g.beginPath();
+    g.arc(x, y, 3.5, 0, 2 * Math.PI);
+    g.fill();
+    g.shadowBlur = 0;
+    g.fillText(b.call, x + 7, y - 7);
+  }
+  g.globalAlpha = 1;
+  g.shadowBlur = 0;
+}
+
+// Themes with more than readouts: start and stop their extras as the theme changes.
+const EXTRAS = { radar: [scopeStart, scopeStop] };
+let extra = null;
+function setExtra(theme) {
+  const next = EXTRAS[theme] ?? null;
+  if (next === extra) return;
+  extra?.[1]();
+  extra = next;
+  extra?.[0]();
+}
 
 // A UTC station clock in the header, ticking on the second. On nixies it runs every cathode once a minute, the
 // "slot machine" real clocks use against cathode poisoning.

@@ -474,10 +474,179 @@ select { font: inherit; font-size: 13px; color: var(--text); background: var(--b
   background: linear-gradient(transparent calc(33% - .5px), rgba(210, 255, 250, .13) 33%, transparent calc(33% + .5px),
     transparent calc(68% - .5px), rgba(210, 255, 250, .13) 68%, transparent calc(68% + .5px));
 }
+/* Art deco: gold sunburst, double-ruled frames with stepped corners, speed-line rules and brass drum counters. */
+:root[data-theme="deco"] {
+  --bg: #08100d; --card: #0d1512; --line: #2c3a33; --text: #efe6cf; --dim: #a99a70; --accent: #d4af37;
+  --gold: #d4af37; --gold-hi: #f3dc8c; --gold-lo: #8a6a24;
+}
+:root[data-theme="deco"] body {
+  background:
+    repeating-conic-gradient(from -90deg at 50% -10%, rgba(212, 175, 55, .07) 0deg 2deg, transparent 2deg 7deg),
+    radial-gradient(ellipse at 50% -10%, #1b2a22, #08100d 70%);
+  background-attachment: fixed;
+  font-family: "Bahnschrift", "Futura", "Century Gothic", "Segoe UI", sans-serif;
+}
+:root[data-theme="deco"] header {
+  background: linear-gradient(#0f1a15, #08100d); border-bottom: 1px solid var(--gold);
+  box-shadow: 0 3px 0 #08100d, 0 4px 0 var(--gold);
+}
+:root[data-theme="deco"] .brand {
+  font-family: "Bahnschrift", "Futura", "Century Gothic", sans-serif; text-transform: uppercase;
+  letter-spacing: .45em; color: var(--gold); text-shadow: none;
+}
+:root[data-theme="deco"] .brand::before {
+  content: ""; display: inline-block; width: 26px; height: 13px; margin-right: 12px; vertical-align: -1px;
+  border-radius: 26px 26px 0 0; /* a rising-sun fan */
+  background: repeating-conic-gradient(from -90deg at 50% 100%, var(--gold) 0deg 6deg, transparent 6deg 15deg);
+}
+:root[data-theme="deco"] .card {
+  position: relative; background: linear-gradient(170deg, #101a16, #0a120f); border: 1px solid var(--gold);
+  border-radius: 0; box-shadow: inset 0 0 0 5px #0a120f, inset 0 0 0 6px rgba(212, 175, 55, .55), 0 12px 28px rgba(0, 0, 0, .6);
+  padding: 22px 24px;
+}
+/* Stepped ziggurat corners, drawn as gold bars at each corner. */
+:root[data-theme="deco"] .card::before {
+  content: ""; position: absolute; inset: -1px; pointer-events: none;
+  --s: linear-gradient(var(--gold), var(--gold));
+  background:
+    var(--s) 0 0 / 22px 3px, var(--s) 0 0 / 3px 22px, var(--s) 6px 6px / 12px 2px, var(--s) 6px 6px / 2px 12px,
+    var(--s) 100% 0 / 22px 3px, var(--s) 100% 0 / 3px 22px, var(--s) calc(100% - 6px) 6px / 12px 2px, var(--s) calc(100% - 6px) 6px / 2px 12px,
+    var(--s) 0 100% / 22px 3px, var(--s) 0 100% / 3px 22px, var(--s) 6px calc(100% - 6px) / 12px 2px, var(--s) 6px calc(100% - 6px) / 2px 12px,
+    var(--s) 100% 100% / 22px 3px, var(--s) 100% 100% / 3px 22px, var(--s) calc(100% - 6px) calc(100% - 6px) / 12px 2px, var(--s) calc(100% - 6px) calc(100% - 6px) / 2px 12px;
+  background-repeat: no-repeat;
+}
+:root[data-theme="deco"] h2 {
+  font-family: "Bahnschrift", "Futura", "Century Gothic", sans-serif; letter-spacing: .38em; color: var(--gold);
+  font-weight: 600; padding-bottom: 10px; position: relative;
+}
+:root[data-theme="deco"] h2::before { content: "\25C6\2009"; font-size: .8em; }
+/* Speed lines: three gold rules of falling length. */
+:root[data-theme="deco"] h2::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 160px; height: 6px;
+  background: linear-gradient(var(--gold), var(--gold)) 0 0 / 100% 1px no-repeat,
+    linear-gradient(var(--gold), var(--gold)) 0 2.5px / 66% 1px no-repeat,
+    linear-gradient(var(--gold), var(--gold)) 0 5px / 33% 1px no-repeat;
+}
+:root[data-theme="deco"] .card-head h2, :root[data-theme="deco"] .log-head h2 { padding-bottom: 10px; }
+:root[data-theme="deco"] .tile {
+  background: #050a08; border: 1px solid rgba(212, 175, 55, .45); border-radius: 0; text-align: center;
+  box-shadow: inset 0 0 0 3px #050a08, inset 0 0 0 4px rgba(212, 175, 55, .2);
+}
+:root[data-theme="deco"] .tile label { color: var(--gold); text-transform: uppercase; letter-spacing: .25em; font-size: 9px; }
+:root[data-theme="deco"] .tile .disp { width: fit-content; margin: 6px auto 0; }
+:root[data-theme="deco"] .btn {
+  border-radius: 0; border-color: var(--gold); color: var(--gold); background: transparent;
+  text-transform: uppercase; letter-spacing: .2em; font-size: 12px;
+}
+:root[data-theme="deco"] .led { border-radius: 0; letter-spacing: .2em; background: transparent; border: 1px solid rgba(212, 175, 55, .3); }
+:root[data-theme="deco"] .led.on { background: var(--gold); color: #08100d; }
+:root[data-theme="deco"] .fill { background: linear-gradient(90deg, #8a6a24, var(--gold) 70%, #f3dc8c 85%, #c56b5b 92%); }
+.disp.drum {
+  gap: 1px; padding: 3px; font-size: 22px; border-radius: 3px;
+  background: linear-gradient(var(--gold-hi, #f3dc8c), var(--gold-lo, #8a6a24));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .5);
+}
+.state + .disp.drum { font-size: 26px; }
+.clock + .disp.drum { font-size: 17px; }
+.val + .disp.drum, #drive-val + .disp.drum { font-size: 12px; }
+.disp.drum .wheel {
+  position: relative; display: inline-block; width: .68em; height: 1.2em; overflow: hidden; flex: none;
+  font-family: "Bahnschrift SemiCondensed", "Bahnschrift", "Arial Narrow", sans-serif; font-weight: 600;
+  line-height: 1.2em; text-align: center; color: #f4ead0; text-shadow: none;
+  background: linear-gradient(#000, #2a241c 22%, #3a3228 50%, #2a241c 78%, #000);
+}
+.disp.drum .wheel.fixed { width: .45em; }
+.disp.drum .strip { display: flex; flex-direction: column; transition: transform .55s cubic-bezier(.3, 1.4, .5, 1); }
+.disp.drum .strip span { height: 1.2em; flex: none; }
+/* The drum's curve: shade the top and bottom of the window. */
+.disp.drum .wheel::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(rgba(0, 0, 0, .75), transparent 32%, rgba(255, 255, 255, .06) 50%, transparent 68%, rgba(0, 0, 0, .75));
+}
+@media (prefers-reduced-motion: reduce) { .disp.drum .strip { transition: none; } }
+
+/* Radar scope: a PPI scope card, a phosphor CRT finish and graticule tiles. */
+:root[data-theme="radar"] body { background: radial-gradient(ellipse at 50% 30%, #061a24, #01060a 75%); }
+:root[data-theme="radar"] h2, :root[data-theme="radar"] .brand { font-family: var(--mono); letter-spacing: .14em; }
+:root[data-theme="radar"] h2::before { content: "\25B8\2002"; color: var(--accent); }
+:root[data-theme="radar"] .card { border-radius: 3px; border-color: #12384f; box-shadow: inset 0 0 30px rgba(0, 0, 0, .7); }
+:root[data-theme="radar"] .tile {
+  border: 1px solid #0f2c40; border-radius: 2px;
+  background:
+    linear-gradient(rgba(34, 211, 238, .06) 1px, transparent 1px) 0 0 / 12px 12px,
+    linear-gradient(90deg, rgba(34, 211, 238, .06) 1px, transparent 1px) 0 0 / 12px 12px, #020d14;
+}
+:root[data-theme="radar"] .tile label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .1em; font-size: 10px; }
+.scope { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; }
+.scope h2 { align-self: flex-start; }
+.scope-bezel {
+  width: min(100%, 460px); aspect-ratio: 1; padding: 14px; border-radius: 50%;
+  background: radial-gradient(circle, #1a2a33 60%, #0a1218 71%, #2a3a44 72%, #0b1319 100%);
+  box-shadow: 0 0 0 2px #050a0e, 0 8px 30px rgba(0, 0, 0, .8), inset 0 2px 3px rgba(255, 255, 255, .12);
+}
+.scope canvas {
+  width: 100%; height: 100%; border-radius: 50%;
+  background: radial-gradient(circle, #04261f, #011410 70%, #000a08);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, .9), inset 0 0 4px rgba(120, 255, 220, .3);
+}
+.scope .hint { max-width: 460px; text-align: center; }
+
+/* Synthwave: an outrun horizon behind the page, a striped sun over a scrolling neon grid, chrome type. */
+:root[data-theme="synthwave"] body { background: linear-gradient(#0d0221 0, #2a0845 45%, #5b1060 62%, #12021f 62.2%); background-attachment: fixed; }
+:root[data-theme="synthwave"] body::before {
+  content: ""; position: fixed; z-index: -1; left: 50%; top: 22vh; width: 46vh; height: 46vh; margin-left: -23vh;
+  border-radius: 50%; pointer-events: none;
+  background: linear-gradient(#ffe86a, #ff9e3d 40%, #ff3f8e 75%, #c41f8a);
+  box-shadow: 0 0 60px rgba(255, 80, 160, .55), 0 0 140px rgba(255, 120, 60, .35);
+  /* The horizontal bands cut out of the sun's lower half, widening toward the horizon. */
+  -webkit-mask-image: linear-gradient(#000 52%, transparent 52% 55%, #000 55% 63%, transparent 63% 67%, #000 67% 74%,
+    transparent 74% 80%, #000 80% 86%, transparent 86% 94%, #000 94%);
+  mask-image: linear-gradient(#000 52%, transparent 52% 55%, #000 55% 63%, transparent 63% 67%, #000 67% 74%,
+    transparent 74% 80%, #000 80% 86%, transparent 86% 94%, #000 94%);
+}
+:root[data-theme="synthwave"] body::after {
+  content: ""; position: fixed; z-index: -1; left: -50%; right: -50%; top: 62vh; height: 80vh; pointer-events: none;
+  transform-origin: 50% 0; transform: perspective(280px) rotateX(62deg);
+  background:
+    linear-gradient(rgba(255, 60, 200, .9) 2px, transparent 2px) 0 0 / 100% 48px,
+    linear-gradient(90deg, rgba(255, 60, 200, .9) 2px, transparent 2px) 0 0 / 48px 100%;
+  -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 70%, transparent);
+  mask-image: linear-gradient(transparent, #000 12%, #000 70%, transparent);
+  animation: synth-grid 1.6s linear infinite;
+}
+@keyframes synth-grid { to { background-position: 0 48px, 0 0; } }
+@media (prefers-reduced-motion: reduce) { :root[data-theme="synthwave"] body::after { animation: none; } }
+:root[data-theme="synthwave"] header { background: rgba(13, 2, 33, .7); border-bottom: 2px solid #ff3fbf; box-shadow: 0 0 14px #ff3fbf; backdrop-filter: blur(6px); }
+:root[data-theme="synthwave"] .card {
+  background: rgba(20, 4, 40, .62); backdrop-filter: blur(8px); border: 1px solid #ff6bcb; border-radius: 4px;
+  box-shadow: 0 0 10px rgba(255, 107, 203, .55), inset 0 0 12px rgba(45, 226, 230, .18);
+}
+:root[data-theme="synthwave"] .tile { background: rgba(8, 0, 20, .7); border: 1px solid rgba(45, 226, 230, .45); box-shadow: inset 0 0 8px rgba(45, 226, 230, .25); }
+/* Chrome type: a mirror gradient with a horizon line through it. */
+:root[data-theme="synthwave"] .brand,
+:root[data-theme="synthwave"] h2,
+:root[data-theme="synthwave"] .state {
+  font-style: italic; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; text-shadow: none;
+  background: linear-gradient(#ffffff 0, #b9e6ff 46%, #3a1460 50%, #ff6bcb 54%, #ffd319 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 4px rgba(255, 60, 200, .6));
+}
+:root[data-theme="synthwave"] .tile b, :root[data-theme="synthwave"] .val {
+  font-style: italic; font-weight: 800; text-shadow: none;
+  background: linear-gradient(90deg, #2de2e6, #ff6bcb); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 5px rgba(45, 226, 230, .6));
+}
+:root[data-theme="synthwave"] .tile label { color: #2de2e6; text-transform: uppercase; letter-spacing: .2em; font-size: 10px; }
+:root[data-theme="synthwave"] .btn {
+  background: transparent; border-color: #2de2e6; color: #2de2e6; text-transform: uppercase; font-style: italic;
+  box-shadow: 0 0 8px rgba(45, 226, 230, .5), inset 0 0 6px rgba(45, 226, 230, .3);
+}
+:root[data-theme="synthwave"] .fill { background: linear-gradient(90deg, #2de2e6, #ff6bcb 75%, #ffd319 92%, #ff2a6d); }
 @media (max-width: 760px) {
   .disp.flap { font-size: 15px; }
   .disp.nixie { font-size: 17px; }
   .disp.vfd { --dot: 2px; --seg: 19px; }
+  .disp.drum { font-size: 16px; }
   .state + .disp.flap, .state + .disp.nixie { font-size: 20px; }
   .clock + .disp.flap, .clock + .disp.nixie { font-size: 16px; }
   .clock + .disp.vfd { --seg: 16px; }
