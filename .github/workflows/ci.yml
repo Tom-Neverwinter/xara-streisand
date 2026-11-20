@@ -97,7 +97,7 @@ jobs:
           test -x "$cc"
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$cc" cargo +"$RUST" build --locked --release --no-default-features -p xara --target aarch64-linux-android
           file target/aarch64-linux-android/release/xara
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: xara-aarch64-linux-android
           path: |
@@ -122,7 +122,7 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
           RUSTUP_TOOLCHAIN="$RUST" python3 android/build_apk.py --pat
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: xara-android-apk
           path: target/android/xara.apk
