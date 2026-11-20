@@ -182,6 +182,16 @@ impl FromIterator<u32> for Symbol {
 
 pub type Codeword = Vec<Symbol>;
 
+/// VARA HF 4.9.1 from 2027 adds this to every call key it seeds its control codebooks with (lab, 2026-11-19: real
+/// VARA HF with its clock in 2027 calls N1CALL and W1AW at their 2026 keys + 687, the same in 2027 and 2028, and
+/// links with the whole session's codes at the shifted key).
+pub const KEY_SHIFT_2027: u32 = 687;
+
+/// A call key as the codebooks use it: shifted once the process runs on the 2027 tables (HF only; SAT is apart).
+fn key_2027(h: u32) -> u32 {
+    if crate::hf::uses_2027_tables() { h.wrapping_add(KEY_SHIFT_2027) } else { h }
+}
+
 pub fn family(code: u32, bw: Bandwidth) -> u32 {
     if bw == Bandwidth::Sat {
         return sat_family(code);
@@ -266,6 +276,7 @@ impl Codebook {
         if bw == Bandwidth::Sat {
             return Self::new_sat(seed_value, mycall_hashes, role);
         }
+        let (seed_value, mycall_hashes) = (key_2027(seed_value), mycall_hashes.map(key_2027));
         let side_off = [book_off(role.peer()), book_off(role)].map(u64::from);
         let seed = u64::from(seed_value);
         let mut codes: [[Vec<Codeword>; 3]; 2] = Default::default();
@@ -308,6 +319,7 @@ impl Codebook {
             self.set_sat_connect_codes(seed_value, role);
             return VbRnd::new();
         }
+        let seed_value = key_2027(seed_value);
         let side_off = [connect_off(role.peer()), connect_off(role)].map(u64::from);
         let mut r = VbRnd::new();
         for (u, &so) in side_off.iter().enumerate() {

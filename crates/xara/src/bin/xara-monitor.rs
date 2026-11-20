@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 use xara::audio::{self, Backend};
-use xara::cli::{self, UiArgs, Usage, num};
+use xara::cli::{self, TableArgs, UiArgs, Usage, num};
 use xara::monitor::fm::{self, FmMonitor};
 use xara::monitor::ui::{Heard, Shared};
 use xara::monitor::{Monitor, MonitorOpts};
@@ -60,13 +60,14 @@ fn parse() -> Result<Option<Args>, String> {
     let (mut json, mut log) = (false, None);
     let (mut syslog, mut syslog_name) = (None, String::from("xara-monitor"));
     let mut ui = UiArgs::default();
+    let mut tables = TableArgs::default();
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut v = || it.next().ok_or(format!("{k} needs a value"));
         if cli::meta(&k, &USAGE) {
             return Ok(None);
         }
-        if ui.take(&k, &mut v)? {
+        if ui.take(&k, &mut v)? || tables.take(&k, &mut v)? {
             continue;
         }
         match k.as_str() {
@@ -126,6 +127,9 @@ fn parse() -> Result<Option<Args>, String> {
     }
     if fm.is_some() && hf_given {
         return Err("--hf and --fm cannot both be given".into());
+    }
+    if tables.apply(fm.is_some())? {
+        eprintln!("xara-monitor: using VARA {}'s 2027 tables", if fm.is_some() { "FM" } else { "HF" });
     }
     let mon = MonitorOpts { calls, names, blind, key_idle, dump, verbose, diag };
     let syslog = syslog.map(|s| (s, syslog_name));

@@ -19,11 +19,17 @@ pub fn whitening(seed: f64) -> Vec<u8> {
 /// PSK training phasors; `seed` is the bandwidth's whitening seed (HF_SEED, or SAT_SEED for VARA SAT).
 pub fn psk_phasor_index(seed: f64) -> Vec<[u8; PSK_SYMBOLS]> {
     let mut r = VbRnd::stream(seed);
+    psk_layout(std::iter::from_fn(|| Some(r.rand_int(128) as u8)))
+}
+
+/// Narrowband-PSK phasor indices laid out carrier-major, symbols 0..411 then 411..471:
+/// from a seeded stream (legacy, SAT) or from VARA 4.9.1's `Mod2.dat` (2027 set).
+pub fn psk_layout(mut it: impl Iterator<Item = u8>) -> Vec<[u8; PSK_SYMBOLS]> {
     let mut d = vec![[0u8; PSK_SYMBOLS]; PSK_CARRIERS];
     for ks in [0..411, 411..PSK_SYMBOLS] {
         for row in d.iter_mut() {
             for k in ks.clone() {
-                row[k] = r.rand_int(128) as u8;
+                row[k] = it.next().expect("PSK phasor source too short");
             }
         }
     }
@@ -37,13 +43,17 @@ pub fn data_dat(seed: f64) -> Vec<u8> {
 
 /// OFDM training phasors from the bandwidth's whitening seed, like `psk_phasor_index`.
 pub fn ofdm_phasor_index(seed: f64) -> Vec<[u8; OFDM_SYMBOLS]> {
-    let d = data_dat(seed);
-    let mut it = d.iter().copied();
+    ofdm_layout(data_dat(seed).into_iter())
+}
+
+/// OFDM phasor indices, 128 bins, symbols 0..409 then 409..469: from a seeded `Data.dat` (legacy, SAT)
+/// or from VARA 4.9.1's `Mod1.dat` (2027 set).
+pub fn ofdm_layout(mut it: impl Iterator<Item = u8>) -> Vec<[u8; OFDM_SYMBOLS]> {
     let mut out = vec![[0u8; OFDM_SYMBOLS]; OFDM_BINS];
     for ms in [0..409, 409..OFDM_SYMBOLS] {
         for row in out.iter_mut() {
             for m in ms.clone() {
-                row[m] = it.next().unwrap();
+                row[m] = it.next().expect("OFDM phasor source too short");
             }
         }
     }

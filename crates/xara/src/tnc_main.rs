@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use xara::audio::ratematch::{self, TxBuffer};
 use xara::audio::txpath::TxPath;
 use xara::audio::{self, Audio, Backend, Behind};
-use xara::cli::{self, UiArgs, Usage, num};
+use xara::cli::{self, TableArgs, UiArgs, Usage, num};
 use xara::ptt::{PttCtl, PttSpec, PttTiming, Rigctld};
 use xara::record::{self, Recorder};
 use xara::say;
@@ -59,6 +59,7 @@ struct Args {
     doppler: Option<xara::doppler::Schedule>,
     quiet: bool,
     ui: UiArgs,
+    tables: TableArgs,
     ui_control: bool,
     ui_token: Option<String>,
     state_dir: Option<String>,
@@ -106,6 +107,7 @@ fn defaults() -> Args {
         doppler: None,
         quiet: false,
         ui: UiArgs::default(),
+        tables: TableArgs::default(),
         ui_control: false,
         ui_token: None,
         state_dir: None,
@@ -129,7 +131,7 @@ fn defaults() -> Args {
 }
 
 fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) -> Result<(), String> {
-    if a.ui.take(k, &mut v)? {
+    if a.ui.take(k, &mut v)? || a.tables.take(k, &mut v)? {
         return Ok(());
     }
     match k {
@@ -1027,6 +1029,9 @@ fn real_main() -> Result<ExitCode, String> {
     if let Some(to) = &base.syslog {
         let station = base.syslog_name.clone().unwrap_or_else(|| base.call.clone());
         xara::log::syslog(to, &station).map_err(|e| format!("--syslog {to}: {e}"))?;
+    }
+    if base.tables.apply(base.fm.is_some())? {
+        say!("using VARA {}'s 2027 tables", if base.fm.is_some() { "FM" } else { "HF" });
     }
     if let Some(p) = &config {
         say!("config {}", p.display());
