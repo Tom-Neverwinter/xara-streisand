@@ -19,7 +19,9 @@ static NARROW: OnceLock<Vec<RecordTables>> = OnceLock::new();
 static WIDE: OnceLock<Vec<RecordTables>> = OnceLock::new();
 static WHITE: LazyLock<Vec<u8>> = LazyLock::new(|| seq::whitening(seq::FM_SEED));
 
-static FM_2027: OnceLock<[Vec<RecordTables>; 2]> = OnceLock::new();
+/// Narrow and wide tables, and what the codebooks add to call keys for the seed and for the skip count.
+type Set2027 = ([Vec<RecordTables>; 2], (u32, u32));
+static FM_2027: OnceLock<Set2027> = OnceLock::new();
 
 /// Switch this process to VARA FM 4.4.1's 2027 table set, read from `Binary1.dat` (narrow) and
 /// `Binary2.dat` (wide) in `vara_dir`.  Its tables are not generated from a seed.  Call once at
@@ -30,7 +32,17 @@ pub fn uses_2027_tables() -> bool {
     FM_2027.get().is_some()
 }
 
+/// What the control codebooks add to call keys, for the seed and for the skip count: (0, 0) on the legacy tables.
+pub fn key_shifts() -> (u32, u32) {
+    FM_2027.get().map_or((0, 0), |&(_, k)| k)
+}
+
+/// `vara_dir` can also hold an FM named keying (`crate::keying`).
 pub fn use_2027_tables(vara_dir: &std::path::Path) -> Result<(), String> {
+    let shifts = crate::keying::read_info(vara_dir, true)?
+        .map_or((crate::fm::ctrl::KEY_SHIFT_2027, crate::fm::ctrl::SKIP_SHIFT_2027), |i| {
+            (i.seed_offset, i.skip_offset)
+        });
     if NARROW.get().is_some() || WIDE.get().is_some() {
         return Err("2027 tables must be selected before the legacy tables are used".into());
     }
@@ -40,11 +52,11 @@ pub fn use_2027_tables(vara_dir: &std::path::Path) -> Result<(), String> {
         crate::dat::parse_fm_dat(bw, &raw, true).map_err(|e| format!("{name}: {e}"))
     };
     let set = [load(FmBandwidth::Narrow, "Binary1.dat")?, load(FmBandwidth::Wide, "Binary2.dat")?];
-    FM_2027.set(set).map_err(|_| "2027 tables already selected".to_string())
+    FM_2027.set((set, shifts)).map_err(|_| "2027 tables already selected".to_string())
 }
 
 pub fn tables(bw: FmBandwidth) -> &'static [RecordTables] {
-    if let Some(s) = FM_2027.get() {
+    if let Some((s, _)) = FM_2027.get() {
         return &s[bw as usize];
     }
     match bw {

@@ -163,6 +163,7 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
     --fm narrow|wide        FM mode, narrow vs wide
     --tables SET            HF tables: legacy or 2027 (default legacy)
     --vara-dir DIR          VARA HF 4.9.1 (or, with --fm, FM 4.4.1) folder, for --tables 2027
+    --keying DIR            a named keying from xara-keygen (hf_keying, or fm_keying with --fm)
 
     --radio                 enable radio mode
     --drive-db D            TX drive (<= 0 dB, default -5)
@@ -260,6 +261,7 @@ options:
     --hf 500|2300|2750|sat  HF bandwidth (default 2300); sat = VARA SAT
     --tables SET            HF tables: legacy or 2027 (default legacy)
     --vara-dir DIR          VARA HF 4.9.1 (or, with --fm, FM 4.4.1) folder, for --tables 2027
+    --keying DIR            a named keying from xara-keygen (hf_keying, or fm_keying with --fm)
     --fm narrow|wide        monitor VARA FM: connects, CQ, and session text
 
     --call CALL             known call (repeatable)
@@ -279,6 +281,24 @@ options:
     --syslog HOST[:PORT]    also send the log to a syslog server over UDP
     --syslog-name NAME      station name in syslog messages (default: xara-monitor)
     --version and --help    guess
+
+## named keyings
+
+a group of stations can use tables of its own, so they hear only each other:
+frames, connect requests and every other control code of any other keying
+(VARA's included) are ignored. make one with `xara-keygen` and give every
+station of the group the same one:
+
+    xara-keygen --name NET-7 --out keys
+    xara --keying keys/hf_keying ...           # HF
+    xara --fm wide --keying keys/fm_keying ... # FM
+
+the name is the whole definition: the same name gives the same tables on every
+machine, also in XaraNext (whose generator version 1 this is, byte for byte;
+MIT, by x0rro). this is NOT encryption and gives no privacy, and a named keying
+can't talk to VARA. on amateur bands, publish the name you use. on FM, narrow
+and wide stations on one keying can still connect. checked: two xara on NET-7
+link over audio; NET-7 against NET-8, or against the legacy tables, does not.
 
 ## the 2027 tables
 

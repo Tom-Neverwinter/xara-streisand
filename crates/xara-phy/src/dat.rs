@@ -1,7 +1,7 @@
 use crate::crc::crc16_genibus;
 use crate::fm::level::{FmBandwidth, Layout, Record};
 use crate::hf::level::{Bandwidth, FSK_PILOTS, Level, Waveform};
-use crate::rnd::VbRnd;
+use crate::rnd::{Draw, VbRnd};
 
 const HF_PP: u32 = crate::hf::ofdm::PILOT_PERIOD;
 const FM_PP: u32 = crate::fm::level::PILOT_PERIOD;
@@ -23,7 +23,7 @@ pub(crate) fn marker_map(other: &[u16], nc: usize, markers: usize, nsym: usize) 
     other[nc * markers..].chunks(nsym).take(nc).map(|r| r.iter().map(|&v| v != 0).collect()).collect()
 }
 
-fn perm(r: &mut VbRnd, n: u32) -> Vec<u32> {
+fn perm(r: &mut impl Draw, n: u32) -> Vec<u32> {
     let mut used = vec![false; n as usize];
     let mut out = Vec::with_capacity(n as usize);
     while out.len() < n as usize {
@@ -35,7 +35,7 @@ fn perm(r: &mut VbRnd, n: u32) -> Vec<u32> {
     out
 }
 
-fn fsk_other(r: &mut VbRnd, l: &Level) -> Vec<u16> {
+fn fsk_other(r: &mut impl Draw, l: &Level) -> Vec<u16> {
     let Waveform::Fsk { symbols: s, first, last, step, .. } = l.waveform else { unreachable!() };
     let nb = last - first + 1;
     let m = if step > 1 { nb / step + 1 } else { nb };
@@ -91,7 +91,7 @@ fn carrier_other(rows: Vec<Vec<u32>>, spf: u32) -> Vec<u16> {
     out
 }
 
-fn psk_other(r: &mut VbRnd, l: &Level) -> Vec<u16> {
+fn psk_other(r: &mut impl Draw, l: &Level) -> Vec<u16> {
     let (spf, first) = match l.waveform {
         Waveform::Ofdm { spf, first, .. } => (spf, first),
         _ => (l.spf(), 0),
@@ -106,7 +106,7 @@ fn psk_other(r: &mut VbRnd, l: &Level) -> Vec<u16> {
     carrier_other(rows, spf)
 }
 
-fn fm_other(r: &mut VbRnd, f: &Layout) -> Vec<u16> {
+fn fm_other(r: &mut impl Draw, f: &Layout) -> Vec<u16> {
     let gap = if f.spf < 50 { 0 } else { 2 };
     let rows = marker_rows(
         f.nc,
@@ -128,13 +128,22 @@ pub fn hf_tables(bw: Bandwidth) -> Vec<RecordTables> {
 }
 
 fn level_tables(levels: &[Level], seed: f64) -> Vec<RecordTables> {
-    let mut r = VbRnd::stream(seed);
+    level_tables_with(levels, &mut VbRnd::stream(seed))
+}
+
+/// HF tables for `bw` drawn from any source: with VARA's generator and seed the legacy set, with another a named
+/// keying (`crate::keying`).
+pub fn hf_tables_with(bw: Bandwidth, r: &mut impl Draw) -> Vec<RecordTables> {
+    level_tables_with(bw.table(), r)
+}
+
+fn level_tables_with(levels: &[Level], r: &mut impl Draw) -> Vec<RecordTables> {
     levels
         .iter()
         .map(|l| {
-            let chan = perm(&mut r, l.n());
-            let turbo = perm(&mut r, l.k);
-            let other = if l.is_fsk() { fsk_other(&mut r, l) } else { psk_other(&mut r, l) };
+            let chan = perm(r, l.n());
+            let turbo = perm(r, l.k);
+            let other = if l.is_fsk() { fsk_other(r, l) } else { psk_other(r, l) };
             debug_assert_eq!(other.len() as u32, l.other_len());
             RecordTables { chan, turbo, other }
         })
@@ -142,20 +151,32 @@ fn level_tables(levels: &[Level], seed: f64) -> Vec<RecordTables> {
 }
 
 pub fn fm_tables(bw: FmBandwidth) -> Vec<RecordTables> {
-    let mut r = VbRnd::stream(TABLE_SEED);
+    fm_tables_with(bw, &mut VbRnd::stream(TABLE_SEED), &mut VbRnd::stream(FM_RECORD16_SEED))
+}
+
+/// FM tables for `bw`: records 0-15 from `main`, the broadcast record (16) from `broadcast`.  Narrow and wide share
+/// the layouts of records 0-3, so sources starting in the same state give both widths the same connect frame and
+/// lowest levels, which is what lets a narrow and a wide station connect.
+pub fn fm_tables_with(bw: FmBandwidth, main: &mut impl Draw, broadcast: &mut impl Draw) -> Vec<RecordTables> {
+    let one = |r: &mut dyn FnMut(u32) -> u32, f: &Layout| {
+        let mut d = DrawFn(r);
+        let (chan, turbo) = (perm(&mut d, f.n()), perm(&mut d, f.k));
+        RecordTables { chan, turbo, other: fm_other(&mut d, f) }
+    };
+    let b = Record::Broadcast.index();
     bw.layouts()
         .iter()
         .enumerate()
-        .map(|(i, f)| {
-            if i == Record::Broadcast.index() {
-                r = VbRnd::stream(FM_RECORD16_SEED);
-            }
-            let chan = perm(&mut r, f.n());
-            let turbo = perm(&mut r, f.k);
-            let other = fm_other(&mut r, f);
-            RecordTables { chan, turbo, other }
-        })
+        .map(|(i, f)| if i == b { one(&mut |m| broadcast.draw(m), f) } else { one(&mut |m| main.draw(m), f) })
         .collect()
+}
+
+struct DrawFn<'a>(&'a mut dyn FnMut(u32) -> u32);
+
+impl Draw for DrawFn<'_> {
+    fn draw(&mut self, m: u32) -> u32 {
+        (self.0)(m)
+    }
 }
 
 fn put_perm(out: &mut Vec<u8>, p: &[u32]) {
@@ -167,10 +188,18 @@ fn put_perm(out: &mut Vec<u8>, p: &[u32]) {
 }
 
 fn serialize(tables: &[RecordTables]) -> Vec<u8> {
+    serialize_as(tables.iter(), false)
+}
+
+/// A table file: records in the order given, each with its turbo permutation first when `turbo_first` (VARA HF
+/// 4.9.1's 2027 files) or its channel permutation first (legacy and FM files).  Inverse of `parse_hf_dat` /
+/// `parse_fm_dat`.
+pub fn serialize_as<'a>(tables: impl Iterator<Item = &'a RecordTables>, turbo_first: bool) -> Vec<u8> {
     let mut out = Vec::new();
     for t in tables {
-        put_perm(&mut out, &t.chan);
-        put_perm(&mut out, &t.turbo);
+        let (a, b) = if turbo_first { (&t.turbo, &t.chan) } else { (&t.chan, &t.turbo) };
+        put_perm(&mut out, a);
+        put_perm(&mut out, b);
         out.extend(t.other.iter().flat_map(|v| v.to_be_bytes()));
     }
     let crc = crc16_genibus(&out[..out.len() - 1]);

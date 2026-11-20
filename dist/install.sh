@@ -7,6 +7,7 @@ d=${DESTDIR:-}
 
 install -Dm755 "$build/xara" "$d$prefix/bin/xara"
 install -Dm755 "$build/xara-monitor" "$d$prefix/bin/xara-monitor"
+install -Dm755 "$build/xara-keygen" "$d$prefix/bin/xara-keygen"
 install -Dm644 "$here/man/xara.1" "$d$prefix/share/man/man1/xara.1"
 install -Dm644 "$here/man/xara-monitor.1" "$d$prefix/share/man/man1/xara-monitor.1"
 for u in system/xara@.service user/xara.service; do

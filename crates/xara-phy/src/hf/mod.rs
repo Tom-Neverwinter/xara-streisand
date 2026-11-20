@@ -31,12 +31,16 @@ struct Set2027 {
     tables: [Vec<RecordTables>; 3],
     psk: Phasors,
     ofdm: Phasors,
+    /// Added to every call key the control codebooks are seeded with: VARA's 687, or a named keying's own.
+    key_shift: u32,
 }
 static SET_2027: OnceLock<Set2027> = OnceLock::new();
 
 /// Switch this process to the 2027 table set, read from VARA HF 4.9.1's `Mod1.dat`, `Mod2.dat`
-/// and `Binary1-3.dat` in `vara_dir`.  Call once at startup, before anything uses the tables.
+/// and `Binary1-3.dat` in `vara_dir`, or to a named keying (`crate::keying`) in the same layout.
+/// Call once at startup, before anything uses the tables.
 pub fn use_2027_tables(vara_dir: &Path) -> Result<(), String> {
+    let key_shift = crate::keying::read_info(vara_dir, false)?.map_or(ctrl::KEY_SHIFT_2027, |i| i.seed_offset);
     if TABLES.iter().any(|t| t.get().is_some()) || PSK_PHASORS.get().is_some() || OFDM_PHASORS.get().is_some() {
         return Err("2027 tables must be selected before the legacy tables are used".into());
     }
@@ -60,6 +64,7 @@ pub fn use_2027_tables(vara_dir: &Path) -> Result<(), String> {
         tables,
         psk: phasors(seq::psk_layout(psk.into_iter())),
         ofdm: phasors(seq::ofdm_layout(ofdm.into_iter())),
+        key_shift,
     };
     SET_2027.set(set).map_err(|_| "2027 tables already selected".to_string())
 }
@@ -67,6 +72,11 @@ pub fn use_2027_tables(vara_dir: &Path) -> Result<(), String> {
 /// True once `use_2027_tables` has switched this process to the 2027 set.
 pub fn uses_2027_tables() -> bool {
     SET_2027.get().is_some()
+}
+
+/// What the control codebooks add to call keys: 0 on the legacy tables.
+pub fn key_shift() -> u32 {
+    SET_2027.get().map_or(0, |s| s.key_shift)
 }
 
 fn phasors<const N: usize>(idx: Vec<[u8; N]>) -> Phasors {

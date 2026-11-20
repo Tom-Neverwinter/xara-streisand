@@ -4,6 +4,8 @@
 
 maintained fork of x0rro/xara after upstream was withdrawn.
 
+- named keyings: `xara-keygen --name NAME --out DIR` writes a group's own HF and FM tables, loaded with `--keying DIR/hf_keying` (or `fm_keying` with `--fm`); stations hear only others on the same keying. Generator version 1 of XaraNext 1.3 (MIT, x0rro), byte for byte, so a name means the same tables in both. Checked live: two xara on one keying link, on different keyings they don't
+- VARA FM 2027 mode: the codebook skip count now uses key + 687 (the seed keeps + 933), per XaraNext's spec; the old code used + 933 for both, wrong for keys within 246 of a multiple of 32768
 - VARA HF 4.9.3 / FM 4.4.3 (2026-11-20) cancel the 2027-01-01 format switch; checked in the lab (clock in 2027: links with the default legacy tables, not with 2027 ones). `--tables auto` is removed, as following the date would now break links
 - the 2027 VARA format: `--tables 2027` speaks VARA HF 4.9.1's and FM 4.4.1's 2027 mode: their new scrambling/interleaver tables, read from your own VARA folder (`--vara-dir`; nothing of VARA's ships), and the shifted control-code call keys (HF +687, FM +933). Linked live against real VARA run with its clock in 2027 (`lab/`): HF 500/2300/2750 up to L13/L14/L15, FM narrow and wide (G12)
 - Android app (`android/build_apk.py`, CI artifact `xara-android-apk`): the modem and Pat in one APK, monitor (receive only) or TNC (after an explicit transmit confirmation), audio devices listed by name so a USB sound card on OTG is picked from a list, a foreground service that keeps running with the screen off, and the web UIs in-app; tested on an Android 14 emulator

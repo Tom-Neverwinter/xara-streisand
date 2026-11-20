@@ -22,7 +22,7 @@ cargo build --manifest-path "$root/Cargo.toml" --locked --release --target "$tar
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir "$stage/$name"
-cp "$root/target/$target/release/xara" "$root/target/$target/release/xara-monitor" \
+cp "$root/target/$target/release/xara" "$root/target/$target/release/xara-monitor" "$root/target/$target/release/xara-keygen" \
     "$root/LICENSE" "$root/README.md" "$stage/$name/"
 cp -r "$root/dist" "$stage/$name/"
 tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner \

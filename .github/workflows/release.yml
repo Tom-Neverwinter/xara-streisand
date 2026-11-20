@@ -92,7 +92,7 @@ jobs:
           $ver = $env:GITHUB_REF_NAME.TrimStart('v')
           $name = "xara-$ver-x86_64-pc-windows-msvc"
           New-Item -ItemType Directory -Force "out\$name" | Out-Null
-          Copy-Item target\release\xara.exe, target\release\xara-monitor.exe, LICENSE, README.md, BUILDING.md "out\$name\"
+          Copy-Item target\release\xara.exe, target\release\xara-monitor.exe, target\release\xara-keygen.exe, LICENSE, README.md, BUILDING.md "out\$name\"
           Copy-Item -Recurse dist "out\$name\dist"
           Compress-Archive -Path "out\$name" -DestinationPath "out\$name.zip"
           $h = (Get-FileHash -Algorithm SHA256 "out\$name.zip").Hash.ToLower()
