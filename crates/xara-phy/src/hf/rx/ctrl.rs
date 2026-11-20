@@ -1,7 +1,7 @@
 use super::FS3;
 use super::snr::SNR_REF_DB;
 use crate::dsp::{Hold, Track, Window};
-use crate::hf::ctrl::{COMB, Codeword, Fmt, family, family_comb};
+use crate::hf::ctrl::{COMB, Codeword, Fmt, family, family_comb, sat_family_comb};
 use crate::hf::level::Bandwidth;
 use num_complex::Complex64;
 
@@ -159,7 +159,9 @@ impl CtrlDetector {
                         continue;
                     }
                     seen.push((e.code, tones.clone()));
-                    let comb0 = family_comb(family(e.code, self.bw)).1 as usize;
+                    let v = family(e.code, self.bw);
+                    let comb = if self.bw == Bandwidth::Sat { sat_family_comb(v) } else { family_comb(v) };
+                    let comb0 = comb.1 as usize;
                     let blocks: Vec<Vec<usize>> = tones
                         .iter()
                         .map(|s| s.iter().map(|&k| comb0 + COMB_TONES * ((k - comb0) / COMB_TONES)).collect())

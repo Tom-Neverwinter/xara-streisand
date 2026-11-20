@@ -178,6 +178,80 @@ fn serialize(tables: &[RecordTables]) -> Vec<u8> {
     out
 }
 
+/// Parse a VARA HF table file (`Binary1..6.dat`), the inverse of `serialize`.  The 2027 files
+/// (`Binary1-3`) store each record's turbo permutation before its channel permutation
+/// (`turbo_first`); the legacy files (`Binary4-6`) store the channel permutation first.
+pub fn parse_hf_dat(bw: Bandwidth, raw: &[u8], turbo_first: bool) -> Result<Vec<RecordTables>, String> {
+    if raw.len() < 3 || crc16_genibus(&raw[..raw.len() - 3]).to_be_bytes() != raw[raw.len() - 2..] {
+        return Err("CRC trailer mismatch: not an original VARA table file".into());
+    }
+    let mut pos = 0usize;
+    let mut take = |n: usize, w: usize| -> Result<Vec<u32>, String> {
+        let b = raw.get(pos..pos + n * w).filter(|_| pos + n * w <= raw.len() - 2).ok_or("table file too short")?;
+        pos += n * w;
+        Ok(b.chunks(w).map(|c| c.iter().fold(0u32, |a, &x| a << 8 | u32::from(x))).collect())
+    };
+    let width = |n: u32| if n > 65536 { 3 } else { 2 };
+    let is_perm = |p: &[u32]| {
+        let mut seen = vec![false; p.len()];
+        p.iter().all(|&v| (v as usize) < p.len() && !std::mem::replace(&mut seen[v as usize], true))
+    };
+    let mut out = Vec::new();
+    for l in bw.table() {
+        let (a, b) = if turbo_first { (l.k, l.n()) } else { (l.n(), l.k) };
+        let first = take(a as usize, width(a) as usize)?;
+        let second = take(b as usize, width(b) as usize)?;
+        let (chan, turbo) = if turbo_first { (second, first) } else { (first, second) };
+        let other = take(l.other_len() as usize, 2)?.into_iter().map(|v| v as u16).collect();
+        if !is_perm(&chan) || !is_perm(&turbo) {
+            return Err(format!("record for level {} is not a permutation", out.len() + 1));
+        }
+        out.push(RecordTables { chan, turbo, other });
+    }
+    if pos != raw.len() - 2 {
+        return Err(format!("{} unexpected bytes after the last record", raw.len() - 2 - pos));
+    }
+    Ok(out)
+}
+
+/// Parse a VARA FM table file.  Legacy `Binary3/4.dat` store records 0..=16 in order; VARA FM
+/// 4.4.1's 2027 files `Binary1/2.dat` store them in reverse (`reversed`).  Channel permutation
+/// first in both.
+pub fn parse_fm_dat(bw: FmBandwidth, raw: &[u8], reversed: bool) -> Result<Vec<RecordTables>, String> {
+    if raw.len() < 3 || crc16_genibus(&raw[..raw.len() - 3]).to_be_bytes() != raw[raw.len() - 2..] {
+        return Err("CRC trailer mismatch: not an original VARA table file".into());
+    }
+    let mut pos = 0usize;
+    let mut take = |n: u32| -> Result<Vec<u32>, String> {
+        let w = if n > 65536 { 3 } else { 2 };
+        let end = pos + n as usize * w;
+        let b = raw.get(pos..end).filter(|_| end <= raw.len() - 2).ok_or("table file too short")?;
+        pos = end;
+        Ok(b.chunks(w).map(|c| c.iter().fold(0u32, |a, &x| a << 8 | u32::from(x))).collect())
+    };
+    let is_perm = |p: &[u32]| {
+        let mut seen = vec![false; p.len()];
+        p.iter().all(|&v| (v as usize) < p.len() && !std::mem::replace(&mut seen[v as usize], true))
+    };
+    let layouts = bw.layouts();
+    let order: Vec<usize> = if reversed { (0..layouts.len()).rev().collect() } else { (0..layouts.len()).collect() };
+    let mut out = vec![None; layouts.len()];
+    for i in order {
+        let f = &layouts[i];
+        let chan = take(f.n())?;
+        let turbo = take(f.k)?;
+        let other = take(f.other_len())?.into_iter().map(|v| v as u16).collect();
+        if !is_perm(&chan) || !is_perm(&turbo) {
+            return Err(format!("record {i} is not a permutation"));
+        }
+        out[i] = Some(RecordTables { chan, turbo, other });
+    }
+    if pos != raw.len() - 2 {
+        return Err(format!("{} unexpected bytes after the last record", raw.len() - 2 - pos));
+    }
+    Ok(out.into_iter().map(Option::unwrap).collect())
+}
+
 pub fn hf_dat(bw: Bandwidth) -> Vec<u8> {
     serialize(&hf_tables(bw))
 }

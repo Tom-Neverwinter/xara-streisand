@@ -19,7 +19,34 @@ static NARROW: OnceLock<Vec<RecordTables>> = OnceLock::new();
 static WIDE: OnceLock<Vec<RecordTables>> = OnceLock::new();
 static WHITE: LazyLock<Vec<u8>> = LazyLock::new(|| seq::whitening(seq::FM_SEED));
 
+static FM_2027: OnceLock<[Vec<RecordTables>; 2]> = OnceLock::new();
+
+/// Switch this process to VARA FM 4.4.1's 2027 table set, read from `Binary1.dat` (narrow) and
+/// `Binary2.dat` (wide) in `vara_dir`.  Its tables are not generated from a seed.  Call once at
+/// startup, before anything uses the tables.  The FM phase scramble is left as is: no date gate
+/// on it has been found.
+/// True once `use_2027_tables` has switched this process to the 2027 set.
+pub fn uses_2027_tables() -> bool {
+    FM_2027.get().is_some()
+}
+
+pub fn use_2027_tables(vara_dir: &std::path::Path) -> Result<(), String> {
+    if NARROW.get().is_some() || WIDE.get().is_some() {
+        return Err("2027 tables must be selected before the legacy tables are used".into());
+    }
+    let load = |bw, name: &str| {
+        let p = vara_dir.join(name);
+        let raw = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        crate::dat::parse_fm_dat(bw, &raw, true).map_err(|e| format!("{name}: {e}"))
+    };
+    let set = [load(FmBandwidth::Narrow, "Binary1.dat")?, load(FmBandwidth::Wide, "Binary2.dat")?];
+    FM_2027.set(set).map_err(|_| "2027 tables already selected".to_string())
+}
+
 pub fn tables(bw: FmBandwidth) -> &'static [RecordTables] {
+    if let Some(s) = FM_2027.get() {
+        return &s[bw as usize];
+    }
     match bw {
         FmBandwidth::Narrow => NARROW.get_or_init(|| fm_tables(bw)),
         FmBandwidth::Wide => WIDE.get_or_init(|| fm_tables(bw)),

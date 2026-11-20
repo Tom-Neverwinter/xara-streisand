@@ -39,15 +39,24 @@ fn rows<const N: usize>(r: &mut VbRnd, nblock: u32, block0: u32) -> [Tones; N] {
     })
 }
 
+/// VARA FM 4.4.1 from 2027 adds this to both call keys it seeds its control codebooks with (lab, 2026-11-19: two real
+/// VARA FM stations with their clock in 2027 link with every control code at the 2026 keys + 933; VARA HF's is 687).
+pub const KEY_SHIFT_2027: u32 = 933;
+
+/// A call key as the codebooks use it: shifted once the process runs on VARA FM's 2027 tables.
+fn key_2027(key: u32) -> u32 {
+    if crate::fm::code::uses_2027_tables() { key.wrapping_add(KEY_SHIFT_2027) } else { key }
+}
+
 pub fn codes(key: u32) -> Vec<Codeword> {
     let mut r = VbRnd::new();
-    r.seed_rnd_wide(u64::from(key) + 10);
+    r.seed_rnd_wide(u64::from(key_2027(key)) + 10);
     (0..22).map(|_| rows(&mut r, 7, CODE_BLOCK0)).collect()
 }
 
 pub fn connect_codes(key: u32) -> [Codeword; 2] {
     let mut r = VbRnd::new();
-    r.seed_rnd_wide(u64::from(key) + 199);
+    r.seed_rnd_wide(u64::from(key_2027(key)) + 199);
     std::array::from_fn(|_| rows(&mut r, 7, CODE_BLOCK0))
 }
 
