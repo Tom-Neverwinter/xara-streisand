@@ -438,10 +438,12 @@ fn ptt_released_on_shutdown_flag() {
     feed_until(&mut c, true, |_| !states(&rec).is_empty());
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
     wait_until(|| states(&rec).len() >= 2);
-    assert_eq!(states(&rec), [true, false]);
     assert!(c.set(true).is_ok());
     assert!(c.finish().is_ok());
-    assert_eq!(states(&rec), [true, false]);
+    // A slow runner can stall the feed long enough for the stall watchdog to release first, then
+    // shutdown releases again: any number of releases is fine, re-keying is not.
+    let s = states(&rec);
+    assert!(s[0] && s[1..].iter().all(|&on| !on), "{s:?}");
 }
 
 struct Stuck(Rec);
