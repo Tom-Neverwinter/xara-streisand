@@ -14,6 +14,7 @@ mod eq;
 pub mod fec;
 pub mod fm;
 pub mod hf;
+pub mod keying;
 mod ofdm;
 mod receiver;
 pub mod rnd;

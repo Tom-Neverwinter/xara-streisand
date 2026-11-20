@@ -187,9 +187,10 @@ pub type Codeword = Vec<Symbol>;
 /// links with the whole session's codes at the shifted key).
 pub const KEY_SHIFT_2027: u32 = 687;
 
-/// A call key as the codebooks use it: shifted once the process runs on the 2027 tables (HF only; SAT is apart).
+/// A call key as the codebooks use it: shifted once the process runs on the 2027 tables or a named keying (HF only;
+/// SAT is apart).
 fn key_2027(h: u32) -> u32 {
-    if crate::hf::uses_2027_tables() { h.wrapping_add(KEY_SHIFT_2027) } else { h }
+    h.wrapping_add(crate::hf::key_shift())
 }
 
 pub fn family(code: u32, bw: Bandwidth) -> u32 {

@@ -99,6 +99,8 @@ impl TableArgs {
                 self.set = Some(s);
             }
             "--vara-dir" => self.vara_dir = Some(v()?.into()),
+            // A named keying (xara-keygen) loads like VARA's 2027 files; its xara-keying.txt sets the key offsets.
+            "--keying" => (self.set, self.vara_dir) = (Some("2027".into()), Some(v()?.into())),
             _ => return Ok(false),
         }
         Ok(true)
