@@ -127,6 +127,18 @@ The systemd, udev and sysusers files and `dist/install.sh` are Linux-only. The m
 
 If you're using a version of EmComm Tools that includes XARA support (R7 at the time of writing), you don't need to build or install XARA by hand. Download [the 0.1.3 source release](https://github.com/anelson/xara/releases/download/v0.1.3/xara-0.1.3.tar.gz), save it as `xara-0.1.3.tar.gz`, and follow the [EmComm Tools xara source package requirements](https://github.com/thetechprepper/emcomm-tools-os-community/blob/release/r7/scripts/xara.md). In most cases it is enough to place the archive in `emcomm-tools-os-community/scripts/` and proceed as normal.
 
+### Release files
+
+[Releases](https://github.com/Tom-Neverwinter/xara-streisand/releases) carry:
+
+- `xara-VERSION-TARGET.tar.xz`: `xara`, `xara-monitor` and `xara-keygen` for Linux x86_64, arm64 and armv7 (Raspberry Pi)
+- `xara-VERSION-x86_64-pc-windows-msvc.zip`: the same for Windows
+- `xara-VERSION-android.apk`: the Android app (see [docs/android.md](docs/android.md))
+- `xara-VERSION.tar.xz` and `xara-VERSION-vendor.tar.xz`: the source and its dependencies, for building offline
+- `SHA256SUMS` (the reproducible files; the release tag lists the same sums) plus a `.sha256` for the zip and the APK
+
+macOS has no ready-built binaries yet; build it from source (see [BUILDING.md](BUILDING.md)).
+
 ### Reproducing a release
 
 Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on x86_64:

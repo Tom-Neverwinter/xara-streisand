@@ -14,34 +14,9 @@ jobs:
   bins:
     uses: ./.github/workflows/bins.yml
 
-  source:
-    runs-on: ubuntu-24.04
-    container: ubuntu:22.04
-    env:
-      DEBIAN_FRONTEND: noninteractive
-    steps:
-      - run: |
-          apt-get update && apt-get install -y --no-install-recommends ca-certificates git
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: actions/checkout@v7
-      - run: scripts/release_deps.sh x86_64-unknown-linux-gnu
-      - run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: tag matches version
-        run: |
-          ver=$(sed -n 's/^version = "\(.*\)"$/\1/p;T;q' Cargo.toml)
-          test "${GITHUB_REF_NAME#v}" = "$ver"
-      - run: cargo fetch --locked
-      - run: scripts/release_tarball.sh HEAD
-      - uses: actions/upload-artifact@v7
-        with:
-          name: source
-          path: |
-            target/dist/*.tar.xz
-            target/dist/*.buildinfo
-          if-no-files-found: error
-
+  # bins.yml also builds the source tarball, so CI on main produces every sum the tag must carry.
   release:
-    needs: [bins, source]
+    needs: [bins]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -49,6 +24,10 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
+      - name: tag matches version
+        run: |
+          ver=$(sed -n 's/^version = "\(.*\)"$/\1/p;T;q' Cargo.toml)
+          test "${GITHUB_REF_NAME#v}" = "$ver"
       - uses: actions/download-artifact@v8
         with:
           path: out
@@ -105,3 +84,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: gh release upload $env:GITHUB_REF_NAME (Get-ChildItem out\*.zip, out\*.zip.sha256)
+
+  # The Android APK is not byte-reproducible either: built after the draft release exists, uploaded with its own sum.
+  apk:
+    needs: [release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: echo "RUST=$(cat .rust-version)" >> "$GITHUB_ENV"
+      - run: >-
+          rustup toolchain install "$RUST" --profile minimal
+          --target aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: false
+      - name: build the APK
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          RUSTUP_TOOLCHAIN="$RUST" python3 android/build_apk.py --pat
+          name="xara-${GITHUB_REF_NAME#v}-android.apk"
+          mkdir out && cp target/android/xara.apk "out/$name"
+          (cd out && sha256sum "$name" > "$name.sha256")
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: out/*.apk
+      - name: upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" out/*

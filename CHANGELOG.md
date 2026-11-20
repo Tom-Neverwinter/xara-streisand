@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased (xara-streisand)
+## 0.2.0
 
-maintained fork of x0rro/xara after upstream was withdrawn.
+2026-11-20. xara-streisand: maintained fork of x0rro/xara after upstream was withdrawn.
 
 - SAT: data frames now lead with 0.2 s of random symbols, as VARA SAT sends (HF uses 0.08 / 0.12 s). With the shorter lead VARA SAT accepted xara's opening header only about half the time, so xara calling SAT was a coin flip; now 9/9 in the lab (old and rebuilt 4.4.5)
 - named keyings: `xara-keygen --name NAME --out DIR` writes a group's own HF and FM tables, loaded with `--keying DIR/hf_keying` (or `fm_keying` with `--fm`); stations hear only others on the same keying. Generator version 1 of XaraNext 1.3 (MIT, x0rro), byte for byte, so a name means the same tables in both. Checked live: two xara on one keying link, on different keyings they don't
