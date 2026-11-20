@@ -80,7 +80,7 @@ pub fn args<A>(r: Result<Option<A>, String>, usage: &Usage) -> Result<A, ExitCod
     }
 }
 
-/// `--tables legacy|2027|auto` and `--vara-dir DIR`: which VARA HF table set to use.
+/// `--tables legacy|2027` and `--vara-dir DIR`: which VARA HF table set to use.
 #[derive(Default)]
 pub struct TableArgs {
     pub set: Option<String>,
@@ -92,8 +92,9 @@ impl TableArgs {
         match k {
             "--tables" => {
                 let s = v()?.to_ascii_lowercase();
-                if !matches!(s.as_str(), "legacy" | "2027" | "auto") {
-                    return Err(format!("--tables: expected legacy, 2027 or auto, not {s}"));
+                // VARA HF 4.9.3 / FM 4.4.3 (2026-11-20) dropped the 2027-01-01 switch, so there is no `auto` to follow the date.
+                if !matches!(s.as_str(), "legacy" | "2027") {
+                    return Err(format!("--tables: expected legacy or 2027, not {s}"));
                 }
                 self.set = Some(s);
             }
@@ -106,12 +107,7 @@ impl TableArgs {
     /// Apply the selection; call before any modem is built.  `fm` picks VARA FM's tables instead
     /// of HF's.  Returns true when the 2027 set is in use.
     pub fn apply(&self, fm: bool) -> Result<bool, String> {
-        let new = match self.set.as_deref().unwrap_or("legacy") {
-            "2027" => true,
-            "auto" => utc_year(std::time::SystemTime::now()) >= 2027,
-            _ => false,
-        };
-        if !new {
+        if self.set.as_deref() != Some("2027") {
             return Ok(false);
         }
         let dir =
@@ -121,33 +117,6 @@ impl TableArgs {
             false => xara_phy::hf::use_2027_tables(dir),
         }
         .map(|()| true)
-    }
-}
-
-// shortcut: VARA switches on local time and this uses UTC, so `auto` can be up to a day off at New Year; use --tables 2027 to force it.
-fn utc_year(t: std::time::SystemTime) -> i64 {
-    let days = t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() / 86400) as i64;
-    // civil-from-days (Howard Hinnant), proleptic Gregorian
-    let z = days + 719_468;
-    let (era, doe) = (z.div_euclid(146_097), z.rem_euclid(146_097));
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let m = (5 * doy + 2) / 153;
-    yoe + era * 400 + i64::from(m >= 10)
-}
-
-#[cfg(test)]
-mod table_tests {
-    use super::utc_year;
-    use std::time::{Duration, UNIX_EPOCH};
-
-    #[test]
-    fn year_boundaries() {
-        let at = |s: u64| utc_year(UNIX_EPOCH + Duration::from_secs(s));
-        assert_eq!(at(0), 1970);
-        assert_eq!(at(1_798_761_599), 2026); // 2026-12-31 23:59:59 UTC
-        assert_eq!(at(1_798_761_600), 2027); // 2027-01-01 00:00:00 UTC
-        assert_eq!(at(951_782_400), 2000); // 2000-02-29
     }
 }
 
