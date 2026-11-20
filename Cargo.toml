@@ -19,7 +19,7 @@ xara-ui = { path = "crates/xara-ui" }
 xara-testkit = { path = "crates/xara-testkit" }
 num-complex = "0.4"
 rustfft = "6.4"
-miniz_oxide = "0.8"
+miniz_oxide = "0.9"
 libc = "0.2"
 alsa-sys = "0.6.1"
 
