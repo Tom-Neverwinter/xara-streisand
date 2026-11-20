@@ -4,7 +4,8 @@
 
 maintained fork of x0rro/xara after upstream was withdrawn.
 
-- the 2027 VARA format: `--tables 2027` (or `auto`, which switches on 2027-01-01) speaks VARA HF 4.9.1's and FM 4.4.1's 2027 mode: their new scrambling/interleaver tables, read from your own VARA folder (`--vara-dir`; nothing of VARA's ships), and the shifted control-code call keys (HF +687, FM +933). Linked live against real VARA run with its clock in 2027 (`lab/`): HF 500/2300/2750 up to L13/L14/L15, FM narrow and wide (G12)
+- VARA HF 4.9.3 / FM 4.4.3 (2026-11-20) cancel the 2027-01-01 format switch; checked in the lab (clock in 2027: links with the default legacy tables, not with 2027 ones). `--tables auto` is removed, as following the date would now break links
+- the 2027 VARA format: `--tables 2027` speaks VARA HF 4.9.1's and FM 4.4.1's 2027 mode: their new scrambling/interleaver tables, read from your own VARA folder (`--vara-dir`; nothing of VARA's ships), and the shifted control-code call keys (HF +687, FM +933). Linked live against real VARA run with its clock in 2027 (`lab/`): HF 500/2300/2750 up to L13/L14/L15, FM narrow and wide (G12)
 - Android app (`android/build_apk.py`, CI artifact `xara-android-apk`): the modem and Pat in one APK, monitor (receive only) or TNC (after an explicit transmit confirmation), audio devices listed by name so a USB sound card on OTG is picked from a list, a foreground service that keeps running with the screen off, and the web UIs in-app; tested on an Android 14 emulator
 - Android: run on an Android 14 emulator: linked builds for arm64, armv7 and x86_64 (NDK), the TNC on AAudio, Pat on the same device driving it over `varahf`, and on-device decode of real VARA audio; `docs/android.md` has the recipe
 - built-in CAT: each protocol (Icom CI-V with USB echo, Kenwood/Elecraft, newer Yaesu, FT-817 5-byte) is tested tuning and keying an emulated rig over a pseudo-terminal; CAT ports without modem lines (socat, Bluetooth) now open on Linux/macOS

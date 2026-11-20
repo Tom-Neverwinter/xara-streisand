@@ -161,8 +161,8 @@ Release tarballs are reproducible. Rebuild one in an `ubuntu:22.04` container on
 
     --hf 500|2300|2750|sat  HF mode, bandwidth setting; sat = VARA SAT
     --fm narrow|wide        FM mode, narrow vs wide
-    --tables SET            HF tables: legacy, 2027 or auto (default legacy)
-    --vara-dir DIR          VARA HF 4.9.1 (or, with --fm, FM 4.4.1) folder, for --tables 2027/auto
+    --tables SET            HF tables: legacy or 2027 (default legacy)
+    --vara-dir DIR          VARA HF 4.9.1 (or, with --fm, FM 4.4.1) folder, for --tables 2027
 
     --radio                 enable radio mode
     --drive-db D            TX drive (<= 0 dB, default -5)
@@ -258,8 +258,8 @@ options:
     --capture SOURCE        audio source
 
     --hf 500|2300|2750|sat  HF bandwidth (default 2300); sat = VARA SAT
-    --tables SET            HF tables: legacy, 2027 or auto (default legacy)
-    --vara-dir DIR          VARA HF 4.9.1 (or, with --fm, FM 4.4.1) folder, for --tables 2027/auto
+    --tables SET            HF tables: legacy or 2027 (default legacy)
+    --vara-dir DIR          VARA HF 4.9.1 (or, with --fm, FM 4.4.1) folder, for --tables 2027
     --fm narrow|wide        monitor VARA FM: connects, CQ, and session text
 
     --call CALL             known call (repeatable)
@@ -282,10 +282,12 @@ options:
 
 ## the 2027 tables
 
-VARA HF 4.9.1 changes its scrambling and interleaver tables on 2027-01-01
-(local time). from then on, upgraded stations can't be decoded with the legacy
-tables that older VARA and xara use. `--tables 2027` uses the new set; `--tables auto`
-picks by the date as VARA does. the new tables aren't generated from a seed,
+VARA HF 4.9.1 and FM 4.4.1 change their scrambling and interleaver tables on
+2027-01-01 (local time). VARA HF 4.9.3 and FM 4.4.3 (2026-11-20) cancel that switch:
+they keep the legacy format after 2027, so the default (`--tables legacy`) is what
+current VARA speaks. `--tables 2027` is only for stations that stay on 4.9.1 / 4.4.1
+past New Year (checked in the lab: 4.9.3 and 4.4.3 with their clock in 2027 link with
+`--tables legacy` and not with `--tables 2027`). the 2027 tables aren't generated from a seed,
 so xara reads them (`Mod1.dat`, `Mod2.dat`, `Binary1-3.dat`) from your own
 VARA HF 4.9.1 folder, given by `--vara-dir`; nothing of VARA's ships with xara.
 VARA FM 4.4.1 switches too: with `--fm`, `--vara-dir` is your VARA FM folder and xara
