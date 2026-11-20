@@ -51,6 +51,15 @@ jobs:
       - run: rustup toolchain install "$RUST" --profile minimal --component clippy
       - run: cargo +"$RUST" clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo +"$RUST" test --locked --release --workspace
+      # unsigned test builds for macOS users; releases carry the same as tarballs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: xara-${{ matrix.runner == 'macos-15' && 'aarch64' || 'x86_64' }}-apple-darwin
+          path: |
+            target/release/xara
+            target/release/xara-monitor
+            target/release/xara-keygen
+          if-no-files-found: error
 
   windows:
     runs-on: windows-2022

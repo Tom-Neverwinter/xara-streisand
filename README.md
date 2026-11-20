@@ -133,11 +133,12 @@ If you're using a version of EmComm Tools that includes XARA support (R7 at the 
 
 - `xara-VERSION-TARGET.tar.xz`: `xara`, `xara-monitor` and `xara-keygen` for Linux x86_64, arm64 and armv7 (Raspberry Pi)
 - `xara-VERSION-x86_64-pc-windows-msvc.zip`: the same for Windows
+- `xara-VERSION-aarch64-apple-darwin.tar.xz` / `xara-VERSION-x86_64-apple-darwin.tar.xz`: the same for macOS (Apple silicon / Intel). They are not signed: after unpacking, run `xattr -dr com.apple.quarantine xara-*` once, or allow them in System Settings > Privacy & Security
 - `xara-VERSION-android.apk`: the Android app (see [docs/android.md](docs/android.md))
 - `xara-VERSION.tar.xz` and `xara-VERSION-vendor.tar.xz`: the source and its dependencies, for building offline
-- `SHA256SUMS` (the reproducible files; the release tag lists the same sums) plus a `.sha256` for the zip and the APK
+- `SHA256SUMS` (the reproducible files; the release tag lists the same sums) plus a `.sha256` for each of the others
 
-macOS has no ready-built binaries yet; build it from source (see [BUILDING.md](BUILDING.md)).
+Between releases, every CI run on main also uploads test builds (artifacts `xara-android-apk`, `xara-aarch64-apple-darwin`, `xara-x86_64-apple-darwin`).
 
 ### Reproducing a release
 

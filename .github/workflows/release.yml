@@ -117,3 +117,37 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" out/*
+
+  # macOS binaries (unsigned) are not byte-reproducible either: built on each arch's runner, uploaded with their sums.
+  macos:
+    needs: [release]
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-15, target: aarch64-apple-darwin }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: echo "RUST=$(cat .rust-version)" >> "$GITHUB_ENV"
+      - run: rustup toolchain install "$RUST" --profile minimal
+      - run: cargo +"$RUST" build --locked --release -p xara
+      - name: package
+        run: |
+          name="xara-${GITHUB_REF_NAME#v}-${{ matrix.target }}"
+          mkdir -p "out/$name"
+          cp target/release/xara target/release/xara-monitor target/release/xara-keygen LICENSE README.md BUILDING.md "out/$name/"
+          cp -R dist "out/$name/"
+          tar -C out -cJf "out/$name.tar.xz" "$name"
+          (cd out && shasum -a 256 "$name.tar.xz" > "$name.tar.xz.sha256")
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: out/*.tar.xz
+      - name: upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" out/*.tar.xz out/*.tar.xz.sha256
