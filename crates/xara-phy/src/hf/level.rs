@@ -221,6 +221,8 @@ pub struct Level {
     pub extra: bool,
     pub(crate) snr_corr_db: f32,
     pub k: u32,
+    /// VARA SAT leads every data frame with 0.2 s of random symbols, longer than HF's 0.08 / 0.12 s.
+    pub(crate) sat_lead: bool,
 }
 
 pub const FSK_PILOTS: u32 = 24;
@@ -312,7 +314,15 @@ impl Level {
     }
 
     pub fn lead_in(&self) -> u32 {
-        let t = if self.bps < 4 { 0.080 } else { 0.120 };
+        // SAT: lab recordings of VARA SAT 4.4.5 (2026-11-20): its L1/L2 frames run 5080 ms, L3 4415 ms, L4 4210 ms,
+        // each a 0.2 s lead-in plus the same data as xara's; with HF's shorter lead VARA took xara's header ~1 in 2.
+        let t = if self.sat_lead {
+            0.200
+        } else if self.bps < 4 {
+            0.080
+        } else {
+            0.120
+        };
         (t / self.symbol_period() - 1e-9).ceil() as u32
     }
 
@@ -411,6 +421,7 @@ const fn fsk(f: Fsk) -> Level {
         skip_on_step_down: f.skip,
         extra: false,
         snr_corr_db: 0.0,
+        sat_lead: false,
         k: f.k,
     }
 }
@@ -425,6 +436,7 @@ const fn psk(p: Psk) -> Level {
         skip_on_step_down: p.skip,
         extra: false,
         snr_corr_db: 0.0,
+        sat_lead: false,
         k: p.k,
     }
 }
@@ -439,8 +451,18 @@ const fn ofdm(o: Ofdm) -> Level {
         skip_on_step_down: o.skip,
         extra: false,
         snr_corr_db: 0.0,
+        sat_lead: false,
         k: o.k,
     }
+}
+
+const fn sat_lead(mut t: [Level; RECORDS]) -> [Level; RECORDS] {
+    let mut i = 0;
+    while i < RECORDS {
+        t[i].sat_lead = true;
+        i += 1;
+    }
+    t
 }
 
 const fn extra(l: Level) -> Level {
@@ -628,7 +650,7 @@ static BW2750: [Level; RECORDS] = [
 /// down one level, with SAT's own FSK tone bands (bins 12-51 and 6-25 instead of 17-48 and
 /// 9-24), L9's threshold and step-down flags, and two extra FSK levels in place of HF 2300's
 /// L1 and L17.
-static SAT: [Level; RECORDS] = [
+static SAT: [Level; RECORDS] = sat_lead([
     fsk(Fsk { symbols: 229, bps: 3, rate: 2, sps: 64, first: 12, last: 51, step: 2, thr: -11.2, k: 200, ..FSK }),
     fsk(Fsk { symbols: 229, bps: 4, rate: 3, sps: 64, first: 12, last: 51, step: 2, thr: -9.4, k: 402, ..FSK }),
     fsk(Fsk { symbols: 396, bps: 4, rate: 3, sps: 32, first: 6, last: 25, step: 1, thr: -6.6, k: 736, ..FSK }),
@@ -656,7 +678,7 @@ static SAT: [Level; RECORDS] = [
     Level { skip_on_step_down: true, ..BW2300[15] },
     extra(fsk(Fsk { symbols: 456, bps: 4, rate: 3, sps: 32, first: 6, last: 25, step: 1, thr: -6.6, k: 856, ..FSK })),
     extra(fsk(Fsk { symbols: 93, bps: 3, rate: 2, sps: 64, first: 12, last: 51, step: 2, thr: -11.2, k: 64, ..FSK })),
-];
+]);
 
 /// VARA SAT's 15 normal levels plus its two extra FSK levels (see `SAT`).
 pub fn sat_table() -> &'static [Level; RECORDS] {
