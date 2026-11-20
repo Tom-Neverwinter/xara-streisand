@@ -23,7 +23,7 @@ jobs:
       - run: |
           apt-get update && apt-get install -y --no-install-recommends ca-certificates git
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: scripts/release_deps.sh x86_64-unknown-linux-gnu
       - run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: tag matches version
@@ -48,7 +48,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           path: out
@@ -83,7 +83,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: build
         run: cargo build --locked --release -p xara
       - name: package
