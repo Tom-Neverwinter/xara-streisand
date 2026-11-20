@@ -59,7 +59,7 @@ jobs:
           git fetch -q --depth=1 origin "+$GITHUB_REF:$GITHUB_REF"
           git for-each-ref --format='%(contents)' "$GITHUB_REF" | grep -E '^[0-9a-f]{64}  xara-' > tag-sums
           diff tag-sums out/SHA256SUMS
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             out/*.tar.xz
@@ -97,7 +97,7 @@ jobs:
           Compress-Archive -Path "out\$name" -DestinationPath "out\$name.zip"
           $h = (Get-FileHash -Algorithm SHA256 "out\$name.zip").Hash.ToLower()
           "$h  $name.zip" | Out-File -Encoding ascii "out\$name.zip.sha256"
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: out/*.zip
       - name: upload to the draft release
