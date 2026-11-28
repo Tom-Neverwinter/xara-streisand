@@ -1,5 +1,9 @@
 # Changelog
 
+## unreleased
+
+- FM busy-channel detection no longer takes an open squelch's hiss for a station: on FM, xara learns the receiver's hiss bin by bin and calls the channel busy when the last 0.34 s differs from it by more than 2 dB across the band (the HF single-bin carrier test assumed flat noise; a real FM receiver's hiss is tilted 15-20 dB, so xara held BUSY nearly all the time and Pat never got a clear channel). HF is unchanged
+
 ## 0.2.0
 
 2026-11-20. xara-streisand: maintained fork of x0rro/xara after upstream was withdrawn.
